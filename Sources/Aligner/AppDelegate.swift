@@ -3,7 +3,7 @@ import Carbon
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
-    private var hintItems: [NSMenuItem] = []
+    private var helpItems: [NSMenuItem] = []
     private var enabledItem: NSMenuItem!
     private var modifierItems: [DrawModifier: NSMenuItem] = [:]
     private var colorItems: [NSMenuItem] = []
@@ -112,14 +112,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let menu = NSMenu()
 
-        for _ in 0..<4 {
-            let item = NSMenuItem()
-            item.isEnabled = false
-            menu.addItem(item)
-            hintItems.append(item)
-        }
-        menu.addItem(.separator())
-
         enabledItem = NSMenuItem(title: "Enabled", action: #selector(toggleEnabled), keyEquivalent: "")
         enabledItem.target = self
         menu.addItem(enabledItem)
@@ -142,6 +134,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(submenuItem("Draw While Holding", modifierMenu()))
         menu.addItem(.separator())
 
+        menu.addItem(submenuItem("Help", helpMenu()))
         let quit = NSMenuItem(title: "Quit Aligner", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
 
@@ -196,6 +189,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return menu
     }
 
+    /// Gesture and shortcut reference. `{m}` is replaced with the current
+    /// draw modifier's symbol. Entries are plain items with a no-op action so
+    /// they render in full contrast rather than greyed out.
+    private static let helpEntries: [String?] = [
+        "Draw a line:  hold {m} and drag",
+        "Move a line:  hold {m} and drag it",
+        "Reshape a line:  hold {m} and drag an endpoint handle (the other end stays put)",
+        "Stretch a line across the screen:  hold {m} and double-click it",
+        nil,
+        "Undo the last line:  double-tap {m}, or ⌃⌥⌘Z",
+        "Clear all lines:  triple-tap {m}, or ⌃⌥⌘C",
+        nil,
+        "Pause Aligner:  uncheck Enabled ({m}-clicks reach other apps again)",
+    ]
+
+    private func helpMenu() -> NSMenu {
+        let menu = NSMenu()
+        for entry in Self.helpEntries {
+            guard entry != nil else {
+                menu.addItem(.separator())
+                continue
+            }
+            let item = NSMenuItem(title: "", action: #selector(helpItemClicked), keyEquivalent: "")
+            item.target = self
+            menu.addItem(item)
+            helpItems.append(item)
+        }
+        return menu
+    }
+
+    @objc private func helpItemClicked() {}
+
     private func modifierMenu() -> NSMenu {
         let menu = NSMenu()
         for candidate in DrawModifier.allCases {
@@ -210,10 +235,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func refreshMenuState() {
         let current = modifier
-        hintItems[0].title = "Hold \(current.symbol) and drag to draw a line"
-        hintItems[1].title = "Hold \(current.symbol) and drag a line to move it"
-        hintItems[2].title = "Double-tap \(current.symbol) to undo the last line"
-        hintItems[3].title = "Triple-tap \(current.symbol) to clear all lines"
+        let entries = Self.helpEntries.compactMap { $0 }
+        for (item, entry) in zip(helpItems, entries) {
+            item.title = entry.replacingOccurrences(of: "{m}", with: current.symbol)
+        }
         enabledItem.state = isEnabled ? .on : .off
         for (candidate, item) in modifierItems {
             item.state = candidate == current ? .on : .off

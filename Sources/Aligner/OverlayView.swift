@@ -2,24 +2,60 @@ import AppKit
 
 /// Full-screen transparent view that draws the committed lines plus whatever
 /// is being dragged. Mouse events only arrive while the owning window is in
-/// capture mode (see `OverlayWindow`). Dragging on empty space draws a new
-/// line; dragging on an existing line moves it.
+/// capture mode (see `OverlayWindow`).
+///
+/// Dragging on empty space draws a new line. Hovering a line shows Preview-style
+/// endpoint handles: dragging the body moves the line, dragging a handle moves
+/// that end while the other stays put (snapped to 45° like drawing), and
+/// double-clicking extends the line across the screen.
 final class OverlayView: NSView {
     /// Called after a drag finishes so the window can release capture if the
     /// modifier was let go mid-drag.
     var onDragEnded: (() -> Void)?
 
+    enum End { case start, end }
+
+    private enum Target: Equatable {
+        case body(Int)
+        case endpoint(Int, End)
+
+        var index: Int {
+            switch self {
+            case .body(let index), .endpoint(let index, _): index
+            }
+        }
+    }
+
     private enum Drag {
         case draw(start: NSPoint, current: NSPoint)
         /// `original` is the line in view coordinates as it was when the drag began.
         case move(index: Int, original: Line, anchor: NSPoint, current: NSPoint)
+        case resize(index: Int, original: Line, end: End, current: NSPoint)
+
+        var editingIndex: Int? {
+            switch self {
+            case .draw: nil
+            case .move(let index, _, _, _), .resize(let index, _, _, _): index
+            }
+        }
+
+        func with(current: NSPoint) -> Drag {
+            switch self {
+            case .draw(let start, _): .draw(start: start, current: current)
+            case .move(let index, let original, let anchor, _): .move(index: index, original: original, anchor: anchor, current: current)
+            case .resize(let index, let original, let end, _): .resize(index: index, original: original, end: end, current: current)
+            }
+        }
     }
 
     private var drag: Drag?
-    private var hoveredIndex: Int?
+    private var hovered: Target?
     private var storeObserver: NSObjectProtocol?
 
     private static let haloWidth: CGFloat = 6
+    private static let handleRadius: CGFloat = 4.5
+    private static let activeHandleRadius: CGFloat = 6
+    private static let handleHitRadius: CGFloat = 9
 
     var isDragging: Bool { drag != nil }
 
@@ -37,9 +73,9 @@ final class OverlayView: NSView {
             forName: LineStore.didChange, object: nil, queue: .main
         ) { [weak self] _ in
             guard let self else { return }
-            // Indices are no longer trustworthy; abandon an in-flight move.
-            if case .move = drag { drag = nil }
-            hoveredIndex = nil
+            // Indices are no longer trustworthy; abandon an in-flight edit.
+            if drag?.editingIndex != nil { drag = nil }
+            hovered = nil
             needsDisplay = true
         }
     }
@@ -80,7 +116,7 @@ final class OverlayView: NSView {
 
     override func mouseMoved(with event: NSEvent) {
         guard isCapturing, drag == nil else { return }
-        setHovered(lineIndex(near: convert(event.locationInWindow, from: nil)))
+        setHovered(target(near: convert(event.locationInWindow, from: nil)))
     }
 
     private func updateCursor() {
@@ -88,20 +124,25 @@ final class OverlayView: NSView {
             NSCursor.arrow.set()
             return
         }
-        if case .move = drag {
+        switch drag {
+        case .move:
             NSCursor.closedHand.set()
-        } else if hoveredIndex != nil {
-            NSCursor.openHand.set()
-        } else {
+        case .draw, .resize:
             NSCursor.crosshair.set()
+        case nil:
+            if case .body = hovered {
+                NSCursor.openHand.set()
+            } else {
+                NSCursor.crosshair.set()
+            }
         }
     }
 
-    private func setHovered(_ index: Int?) {
-        guard index != hoveredIndex else { return }
-        invalidate(localLine(at: hoveredIndex))
-        hoveredIndex = index
-        invalidate(localLine(at: hoveredIndex))
+    private func setHovered(_ target: Target?) {
+        guard target != hovered else { return }
+        invalidate(localLine(at: hovered?.index))
+        hovered = target
+        invalidate(localLine(at: hovered?.index))
         updateCursor()
     }
 
@@ -109,14 +150,33 @@ final class OverlayView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        if let index = lineIndex(near: point), let line = localLine(at: index) {
+        let target = target(near: point)
+
+        if event.clickCount == 2, let target, let line = localLine(at: target.index), let window {
+            let (start, end) = Geometry.extend(line.start, line.end, to: bounds)
+            var extended = line
+            extended.start = start
+            extended.end = end
+            Debug.log("extend \(target.index)")
+            drag = nil
+            LineStore.shared.replace(at: target.index, with: screenLine(extended, window: window))
+            return
+        }
+
+        switch target {
+        case .endpoint(let index, let end):
+            guard let line = localLine(at: index) else { return }
+            drag = .resize(index: index, original: line, end: end, current: point)
+            Debug.log("resize start \(index) \(end)")
+        case .body(let index):
+            guard let line = localLine(at: index) else { return }
             drag = .move(index: index, original: line, anchor: point, current: point)
-            hoveredIndex = index
             Debug.log("move start \(index)")
-        } else {
+        case nil:
             drag = .draw(start: point, current: point)
             Debug.log("draw start \(point)")
         }
+        hovered = target
         invalidate(previewLine)
         updateCursor()
     }
@@ -124,13 +184,7 @@ final class OverlayView: NSView {
     override func mouseDragged(with event: NSEvent) {
         guard let drag else { return }
         let previous = previewLine
-        let point = convert(event.locationInWindow, from: nil)
-        switch drag {
-        case .draw(let start, _):
-            self.drag = .draw(start: start, current: point)
-        case .move(let index, let original, let anchor, _):
-            self.drag = .move(index: index, original: original, anchor: anchor, current: point)
-        }
+        self.drag = drag.with(current: convert(event.locationInWindow, from: nil))
         invalidate(previous)
         invalidate(previewLine)
     }
@@ -139,25 +193,24 @@ final class OverlayView: NSView {
         defer { onDragEnded?() }
         guard let drag, let window else { return }
         let point = convert(event.locationInWindow, from: nil)
-        let previous = previewLine
+        self.drag = drag.with(current: point)
+        let result = previewLine
         self.drag = nil
-        invalidate(previous)
+        invalidate(result)
 
-        switch drag {
-        case .draw(let start, _):
-            let end = Snap.snapped(from: start, to: point)
-            // Ignore accidental clicks; only keep real drags.
-            if hypot(end.x - start.x, end.y - start.y) >= 2 {
-                let line = Line(start: start, end: end, style: LineSettings.shared.style)
-                Debug.log("commit \(line)")
-                LineStore.shared.add(screenLine(line, window: window))
+        if let result, Self.length(of: result) >= 2 {
+            switch drag {
+            case .draw:
+                Debug.log("commit \(result)")
+                LineStore.shared.add(screenLine(result, window: window))
+            case .move(let index, let original, _, _), .resize(let index, let original, _, _):
+                if !Self.sameEndpoints(result, original) {
+                    Debug.log("edit \(index) -> \(result.start) \(result.end)")
+                    LineStore.shared.replace(at: index, with: screenLine(result, window: window))
+                }
             }
-        case .move(let index, let original, let anchor, _):
-            let moved = original.translated(by: NSPoint(x: point.x - anchor.x, y: point.y - anchor.y))
-            Debug.log("move end \(index) -> \(moved.start)")
-            LineStore.shared.replace(at: index, with: screenLine(moved, window: window))
         }
-        setHovered(lineIndex(near: point))
+        setHovered(target(near: point))
         updateCursor()
     }
 
@@ -170,9 +223,30 @@ final class OverlayView: NSView {
             Line(start: start, end: Snap.snapped(from: start, to: current), style: LineSettings.shared.style)
         case .move(_, let original, let anchor, let current):
             original.translated(by: NSPoint(x: current.x - anchor.x, y: current.y - anchor.y))
+        case .resize(_, let original, let end, let current):
+            resized(original, end: end, to: current)
         case nil:
             nil
         }
+    }
+
+    /// Moves one end of `line` to `point` (snapped relative to the other end,
+    /// which stays fixed).
+    private func resized(_ line: Line, end: End, to point: NSPoint) -> Line {
+        var result = line
+        switch end {
+        case .start: result.start = Snap.snapped(from: line.end, to: point)
+        case .end: result.end = Snap.snapped(from: line.start, to: point)
+        }
+        return result
+    }
+
+    private static func length(of line: Line) -> CGFloat {
+        hypot(line.end.x - line.start.x, line.end.y - line.start.y)
+    }
+
+    private static func sameEndpoints(_ a: Line, _ b: Line) -> Bool {
+        a.start == b.start && a.end == b.end
     }
 
     private func localLine(_ line: Line, window: NSWindow) -> Line {
@@ -194,32 +268,28 @@ final class OverlayView: NSView {
         return screen
     }
 
-    /// Index of the closest committed line within grabbing distance of `point`.
-    private func lineIndex(near point: NSPoint) -> Int? {
+    /// What's under `point`: an endpoint handle takes priority over a line
+    /// body; among several candidates the closest wins.
+    private func target(near point: NSPoint) -> Target? {
         guard let window else { return nil }
-        var best: (index: Int, distance: CGFloat)?
+        var bestEndpoint: (target: Target, distance: CGFloat)?
+        var bestBody: (target: Target, distance: CGFloat)?
+
         for (index, line) in LineStore.shared.lines.enumerated() {
             let local = localLine(line, window: window)
+            for (end, endpoint) in [(End.start, local.start), (End.end, local.end)] {
+                let distance = hypot(point.x - endpoint.x, point.y - endpoint.y)
+                if distance <= Self.handleHitRadius, distance < (bestEndpoint?.distance ?? .infinity) {
+                    bestEndpoint = (.endpoint(index, end), distance)
+                }
+            }
             let tolerance = max(6, line.style.width / 2 + 4)
-            let distance = Self.distance(from: point, toSegment: local)
-            if distance <= tolerance, distance < (best?.distance ?? .infinity) {
-                best = (index, distance)
+            let distance = Geometry.distance(from: point, toSegment: local.start, local.end)
+            if distance <= tolerance, distance < (bestBody?.distance ?? .infinity) {
+                bestBody = (.body(index), distance)
             }
         }
-        return best?.index
-    }
-
-    private static func distance(from p: NSPoint, toSegment line: Line) -> CGFloat {
-        let a = line.start, b = line.end
-        let abx = b.x - a.x, aby = b.y - a.y
-        let lengthSquared = abx * abx + aby * aby
-        var t: CGFloat = 0
-        if lengthSquared > 0 {
-            t = ((p.x - a.x) * abx + (p.y - a.y) * aby) / lengthSquared
-            t = min(max(t, 0), 1)
-        }
-        let closest = NSPoint(x: a.x + abx * t, y: a.y + aby * t)
-        return hypot(p.x - closest.x, p.y - closest.y)
+        return bestEndpoint?.target ?? bestBody?.target
     }
 
     private func invalidate(_ line: Line?) {
@@ -230,7 +300,7 @@ final class OverlayView: NSView {
             width: abs(line.end.x - line.start.x),
             height: abs(line.end.y - line.start.y)
         )
-        let margin = line.style.width + Self.haloWidth + 2
+        let margin = line.style.width + Self.haloWidth + Self.activeHandleRadius + 4
         setNeedsDisplay(rect.insetBy(dx: -margin, dy: -margin))
     }
 
@@ -239,18 +309,27 @@ final class OverlayView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         guard let context = NSGraphicsContext.current?.cgContext, let window else { return }
         let scale = window.backingScaleFactor
+        let editingIndex = drag?.editingIndex
+        let hoveredIndex = hovered?.index
 
-        var movingIndex: Int?
-        if case .move(let index, _, _, _) = drag { movingIndex = index }
-
-        for (index, line) in LineStore.shared.lines.enumerated() where index != movingIndex {
+        for (index, line) in LineStore.shared.lines.enumerated() where index != editingIndex {
             let local = localLine(line, window: window)
             if index == hoveredIndex { strokeHalo(local, in: context, scale: scale) }
             stroke(local, in: context, scale: scale)
         }
+
         if let preview = previewLine {
-            if movingIndex != nil { strokeHalo(preview, in: context, scale: scale) }
+            if editingIndex != nil { strokeHalo(preview, in: context, scale: scale) }
             stroke(preview, in: context, scale: scale)
+            if case .resize(_, _, let end, _) = drag {
+                drawHandles(for: preview, active: end, in: context)
+            } else if editingIndex != nil {
+                drawHandles(for: preview, active: nil, in: context)
+            }
+        } else if let hoveredIndex, let local = localLine(at: hoveredIndex) {
+            var active: End?
+            if case .endpoint(_, let end) = hovered { active = end }
+            drawHandles(for: local, active: active, in: context)
         }
     }
 
@@ -297,6 +376,21 @@ final class OverlayView: NSView {
         context.move(to: line.start)
         context.addLine(to: line.end)
         context.strokePath()
+    }
+
+    /// Preview-style endpoint handles: accent-coloured discs with a white ring.
+    /// The `active` one (hovered or being dragged) is drawn larger.
+    private func drawHandles(for line: Line, active: End?, in context: CGContext) {
+        context.setLineDash(phase: 0, lengths: [])
+        for (end, point) in [(End.start, line.start), (End.end, line.end)] {
+            let radius = end == active ? Self.activeHandleRadius : Self.handleRadius
+            let rect = CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2)
+            context.setFillColor(NSColor.controlAccentColor.cgColor)
+            context.fillEllipse(in: rect)
+            context.setStrokeColor(NSColor.white.cgColor)
+            context.setLineWidth(1.5)
+            context.strokeEllipse(in: rect)
+        }
     }
 
     /// Aligns a coordinate so a `width`-wide stroke centred on it covers whole
