@@ -5,12 +5,15 @@ import AppKit
 /// events so the user can draw without the app underneath reacting.
 final class OverlayWindow: NSPanel {
     let overlayView: OverlayView
+    let displayID: CGDirectDisplayID
 
     private var wantsCapture = false
     private(set) var isCapturing = false
 
     init(screen: NSScreen) {
         overlayView = OverlayView(frame: NSRect(origin: .zero, size: screen.frame.size))
+        let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
+        displayID = number.map { CGDirectDisplayID($0.uint32Value) } ?? CGMainDisplayID()
         super.init(
             contentRect: screen.frame,
             styleMask: [.borderless, .nonactivatingPanel],

@@ -13,8 +13,21 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/Aligner "$APP/Contents/MacOS/Aligner"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
-codesign --force --sign - "$APP" >/dev/null 2>&1
-echo "Built $APP"
+# TCC permissions (Screen Recording) are keyed on the code signature, and an
+# ad-hoc signature changes with every build. Sign with a stable identity when
+# one exists: set ALIGNER_SIGN_IDENTITY, or create a self-signed "Code Signing"
+# certificate named "Aligner Dev" in Keychain Access (see README).
+IDENTITY="${ALIGNER_SIGN_IDENTITY:-}"
+if [ -z "$IDENTITY" ]; then
+  IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null | grep -o '"Aligner Dev[^"]*"' | head -1 | tr -d '"' || true)
+fi
+if [ -n "$IDENTITY" ]; then
+  codesign --force --sign "$IDENTITY" "$APP" >/dev/null 2>&1
+  echo "Built $APP (signed as $IDENTITY)"
+else
+  codesign --force --sign - "$APP" >/dev/null 2>&1
+  echo "Built $APP (ad-hoc signature; see README to keep Screen Recording permission across rebuilds)"
+fi
 
 case "${1:-}" in
   run)

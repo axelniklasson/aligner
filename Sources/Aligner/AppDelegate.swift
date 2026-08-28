@@ -5,6 +5,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var helpItems: [NSMenuItem] = []
     private var enabledItem: NSMenuItem!
+    private var snapItem: NSMenuItem!
     private var modifierItems: [DrawModifier: NSMenuItem] = [:]
     private var colorItems: [NSMenuItem] = []
     private var customColorItem: NSMenuItem!
@@ -14,10 +15,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var overlays: [OverlayWindow] = []
     private let watcher = ModifierWatcher(required: DrawModifier.default.flags)
     private let hotKeys = HotKeyCenter()
+    private let sampler = ScreenSampler()
+    private var screenCaptureAuthorized = ScreenSampler.isAuthorized
 
     private enum Keys {
         static let enabled = "enabled"
         static let modifier = "modifier"
+        static let snap = "snapToElements"
+    }
+
+    private var isSnapEnabled: Bool {
+        get { UserDefaults.standard.object(forKey: Keys.snap) as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: Keys.snap) }
     }
 
     private var isEnabled: Bool {
@@ -40,7 +49,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         watcher.onChange = { [weak self] _ in self?.updateCapture() }
         watcher.onFlagsChange = { [weak self] flags in
             let shift = flags.contains(.maskShift)
-            self?.overlays.forEach { $0.overlayView.shiftHeld = shift }
+            let command = flags.contains(.maskCommand)
+            self?.overlays.forEach {
+                $0.overlayView.shiftHeld = shift
+                $0.overlayView.commandHeld = command
+            }
         }
         watcher.onTap = { count in
             // Fires on every tap, so a triple-tap undoes on the second tap and
@@ -71,6 +84,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil
         )
 
+        if isSnapEnabled, !screenCaptureAuthorized {
+            // Puts Aligner in the Screen Recording list and shows the system
+            // prompt if the user hasn't decided yet.
+            ScreenSampler.requestAuthorization()
+        }
+
         if Debug.enabled { runDebugSelfTest() }
     }
 
@@ -84,10 +103,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlays = NSScreen.screens.map(OverlayWindow.init(screen:))
         for window in overlays {
             window.overlayView.shiftHeld = watcher.flags.contains(.maskShift)
+            window.overlayView.commandHeld = watcher.flags.contains(.maskCommand)
+            window.overlayView.edgeMapProvider = { [weak self, weak window] completion in
+                guard let self, let window else { completion(nil); return }
+                let excluded = overlays.map(\.windowNumber)
+                let displayID = window.displayID
+                let frame = window.frame
+                let scale = window.backingScaleFactor
+                Task {
+                    let map = try? await self.sampler.capture(displayID: displayID, frame: frame, scale: scale, excluding: excluded)
+                    await MainActor.run { completion(map) }
+                }
+            }
             window.orderFrontRegardless()
         }
+        Task { await sampler.invalidateCache() }
         Debug.log("overlays: \(overlays.map { "\($0.windowNumber)@\($0.frame)" })")
         updateCapture()
+        applySnapSetting()
+    }
+
+    private func applySnapSetting() {
+        let snap = isSnapEnabled && screenCaptureAuthorized
+        for window in overlays {
+            window.overlayView.snapToEdges = snap
+        }
     }
 
     @objc private func screensChanged() {
@@ -120,6 +160,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         enabledItem = NSMenuItem(title: "Enabled", action: #selector(toggleEnabled), keyEquivalent: "")
         enabledItem.target = self
         menu.addItem(enabledItem)
+
+        snapItem = NSMenuItem(title: "Snap to Elements", action: #selector(toggleSnap), keyEquivalent: "")
+        snapItem.target = self
+        menu.addItem(snapItem)
         menu.addItem(.separator())
 
         let undo = NSMenuItem(title: "Undo Last Line", action: #selector(undoLine), keyEquivalent: "z")
@@ -208,6 +252,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "Move a line:  hold \(m) and drag it",
             reshape,
             "Stretch a line across the screen:  hold \(m) and double-click it",
+            "Snap to elements:  lines snap to edges on screen as you draw, move or reshape; hold ⌘ mid-drag to skip",
             nil,
             "Undo the last line:  double-tap \(m), or ⌃⌥⌘Z",
             "Clear all lines:  triple-tap \(m), or ⌃⌥⌘C",
@@ -252,6 +297,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             item.title = entry
         }
         enabledItem.state = isEnabled ? .on : .off
+        snapItem.state = isSnapEnabled && screenCaptureAuthorized ? .on : .off
+        snapItem.title = isSnapEnabled && !screenCaptureAuthorized
+            ? "Snap to Elements — Needs Screen Recording Access…"
+            : "Snap to Elements"
         for (candidate, item) in modifierItems {
             item.state = candidate == current ? .on : .off
         }
@@ -289,6 +338,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         isEnabled.toggle()
         refreshMenuState()
         updateCapture()
+    }
+
+    @objc private func toggleSnap() {
+        screenCaptureAuthorized = ScreenSampler.isAuthorized
+        if isSnapEnabled, !screenCaptureAuthorized {
+            // Already on but blocked: help the user grant access rather than
+            // toggling it off.
+            explainScreenRecording()
+        } else {
+            isSnapEnabled.toggle()
+            if isSnapEnabled, !screenCaptureAuthorized {
+                ScreenSampler.requestAuthorization()
+                explainScreenRecording()
+            }
+        }
+        refreshMenuState()
+        applySnapSetting()
+    }
+
+    private func explainScreenRecording() {
+        let alert = NSAlert()
+        alert.messageText = "Aligner needs Screen Recording access to snap to elements"
+        alert.informativeText = "To find element edges, Aligner reads the pixels of the screen you're drawing on while you drag. Nothing is stored or sent anywhere.\n\nTurn on Aligner under System Settings → Privacy & Security → Screen & System Audio Recording, then relaunch Aligner."
+        alert.addButton(withTitle: "Open System Settings")
+        alert.addButton(withTitle: "Relaunch Aligner")
+        alert.addButton(withTitle: "Later")
+        NSApp.activate(ignoringOtherApps: true)
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
+                NSWorkspace.shared.open(url)
+            }
+        case .alertSecondButtonReturn:
+            relaunch()
+        default:
+            break
+        }
+    }
+
+    private func relaunch() {
+        let path = Bundle.main.bundleURL.path
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", "sleep 0.5; /usr/bin/open -n \"\(path)\""]
+        try? process.run()
+        NSApp.terminate(nil)
     }
 
     @objc private func undoLine() {
@@ -360,6 +455,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Debug.log("selftest: dumped \(rep.pixelsWide)x\(rep.pixelsHigh) to \(path)")
     }
 
+    /// Captures the first overlay's display via the sampler, writes the luma to
+    /// the PNG named by `ALIGNER_DEBUG_CAPTURE`, and logs the edges found
+    /// around the screen centre.
+    private func dumpCapture() {
+        guard let path = ProcessInfo.processInfo.environment["ALIGNER_DEBUG_CAPTURE"],
+              let window = overlays.first else { return }
+        Debug.log("selftest: screen capture authorized=\(ScreenSampler.isAuthorized)")
+        let excluded = overlays.map(\.windowNumber)
+        let displayID = window.displayID, frame = window.frame, scale = window.backingScaleFactor
+        Task {
+            do {
+                let map = try await sampler.capture(displayID: displayID, frame: frame, scale: scale, excluding: excluded)
+                if let data = map.pngData() { try? data.write(to: URL(fileURLWithPath: path)) }
+                let cx = map.width / 2, cy = map.height / 2
+                var found: [DetectedEdge] = []
+                for y in stride(from: 40, to: map.height - 40, by: 40) {
+                    found += EdgeDetector.edges(in: map, orientation: .horizontal, near: y, along: cx, radius: 20)
+                }
+                for x in stride(from: 40, to: map.width - 40, by: 40) {
+                    found += EdgeDetector.edges(in: map, orientation: .vertical, near: x, along: cy, radius: 20)
+                }
+                Debug.log("selftest: capture dumped to \(path); \(found.count) edges along the centre lines: " +
+                          found.prefix(12).map { "\($0.orientation == .horizontal ? "h" : "v")\($0.position)[\($0.start)-\($0.end)] step \($0.step)" }.joined(separator: ", "))
+            } catch {
+                Debug.log("selftest: capture failed: \(error)")
+            }
+        }
+    }
+
     /// Asks the window server which window would receive a click at the centre
     /// of each screen, first with capture on and then off, and draws a few
     /// sample lines in different styles so a dump can verify rendering.
@@ -388,6 +512,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         LineStore.shared.add(Line(start: NSPoint(x: cx - 150, y: cy - 150), end: NSPoint(x: cx + 150, y: cy + 150), style: green))
                         Debug.log("selftest: added sample lines around (\(cx), \(cy))")
                         dumpOverlay()
+                        dumpCapture()
                     }
                 }
             }
