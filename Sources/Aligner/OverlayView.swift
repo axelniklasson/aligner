@@ -30,12 +30,14 @@ final class OverlayView: NSView {
         case draw(start: NSPoint, current: NSPoint)
         /// `original` is the line in view coordinates as it was when the drag began.
         case move(index: Int, original: Line, anchor: NSPoint, current: NSPoint)
-        case resize(index: Int, original: Line, end: End, current: NSPoint)
+        /// `snap` mirrors whether ⇧ is held: snapped to 45° while it is,
+        /// free otherwise.
+        case resize(index: Int, original: Line, end: End, current: NSPoint, snap: Bool)
 
         var editingIndex: Int? {
             switch self {
             case .draw: nil
-            case .move(let index, _, _, _), .resize(let index, _, _, _): index
+            case .move(let index, _, _, _), .resize(let index, _, _, _, _): index
             }
         }
 
@@ -43,8 +45,13 @@ final class OverlayView: NSView {
             switch self {
             case .draw(let start, _): .draw(start: start, current: current)
             case .move(let index, let original, let anchor, _): .move(index: index, original: original, anchor: anchor, current: current)
-            case .resize(let index, let original, let end, _): .resize(index: index, original: original, end: end, current: current)
+            case .resize(let index, let original, let end, _, let snap): .resize(index: index, original: original, end: end, current: current, snap: snap)
             }
+        }
+
+        func with(snap: Bool) -> Drag {
+            guard case .resize(let index, let original, let end, let current, _) = self else { return self }
+            return .resize(index: index, original: original, end: end, current: current, snap: snap)
         }
     }
 
@@ -58,6 +65,18 @@ final class OverlayView: NSView {
     private static let handleHitRadius: CGFloat = 9
 
     var isDragging: Bool { drag != nil }
+
+    /// Current ⇧ state, fed by the app's modifier poll so a handle drag can
+    /// switch between free and snapped even while the mouse is still.
+    var shiftHeld = false {
+        didSet {
+            guard shiftHeld != oldValue, let drag, case .resize = drag else { return }
+            let previous = previewLine
+            self.drag = drag.with(snap: shiftHeld)
+            invalidate(previous)
+            invalidate(previewLine)
+        }
+    }
 
     var isCapturing = false {
         didSet {
@@ -166,7 +185,7 @@ final class OverlayView: NSView {
         switch target {
         case .endpoint(let index, let end):
             guard let line = localLine(at: index) else { return }
-            drag = .resize(index: index, original: line, end: end, current: point)
+            drag = .resize(index: index, original: line, end: end, current: point, snap: event.modifierFlags.contains(.shift))
             Debug.log("resize start \(index) \(end)")
         case .body(let index):
             guard let line = localLine(at: index) else { return }
@@ -184,7 +203,9 @@ final class OverlayView: NSView {
     override func mouseDragged(with event: NSEvent) {
         guard let drag else { return }
         let previous = previewLine
-        self.drag = drag.with(current: convert(event.locationInWindow, from: nil))
+        self.drag = drag
+            .with(current: convert(event.locationInWindow, from: nil))
+            .with(snap: event.modifierFlags.contains(.shift))
         invalidate(previous)
         invalidate(previewLine)
     }
@@ -203,7 +224,7 @@ final class OverlayView: NSView {
             case .draw:
                 Debug.log("commit \(result)")
                 LineStore.shared.add(screenLine(result, window: window))
-            case .move(let index, let original, _, _), .resize(let index, let original, _, _):
+            case .move(let index, let original, _, _), .resize(let index, let original, _, _, _):
                 if !Self.sameEndpoints(result, original) {
                     Debug.log("edit \(index) -> \(result.start) \(result.end)")
                     LineStore.shared.replace(at: index, with: screenLine(result, window: window))
@@ -223,20 +244,20 @@ final class OverlayView: NSView {
             Line(start: start, end: Snap.snapped(from: start, to: current), style: LineSettings.shared.style)
         case .move(_, let original, let anchor, let current):
             original.translated(by: NSPoint(x: current.x - anchor.x, y: current.y - anchor.y))
-        case .resize(_, let original, let end, let current):
-            resized(original, end: end, to: current)
+        case .resize(_, let original, let end, let current, let snap):
+            resized(original, end: end, to: current, snap: snap)
         case nil:
             nil
         }
     }
 
-    /// Moves one end of `line` to `point` (snapped relative to the other end,
-    /// which stays fixed).
-    private func resized(_ line: Line, end: End, to point: NSPoint) -> Line {
+    /// Moves one end of `line` to `point` while the other end stays fixed,
+    /// snapping to 45° relative to the fixed end when `snap` is set.
+    private func resized(_ line: Line, end: End, to point: NSPoint, snap: Bool) -> Line {
         var result = line
         switch end {
-        case .start: result.start = Snap.snapped(from: line.end, to: point)
-        case .end: result.end = Snap.snapped(from: line.start, to: point)
+        case .start: result.start = snap ? Snap.snapped(from: line.end, to: point) : point
+        case .end: result.end = snap ? Snap.snapped(from: line.start, to: point) : point
         }
         return result
     }
@@ -321,7 +342,7 @@ final class OverlayView: NSView {
         if let preview = previewLine {
             if editingIndex != nil { strokeHalo(preview, in: context, scale: scale) }
             stroke(preview, in: context, scale: scale)
-            if case .resize(_, _, let end, _) = drag {
+            if case .resize(_, _, let end, _, _) = drag {
                 drawHandles(for: preview, active: end, in: context)
             } else if editingIndex != nil {
                 drawHandles(for: preview, active: nil, in: context)

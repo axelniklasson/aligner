@@ -38,6 +38,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         watcher.required = modifier.flags
         watcher.onChange = { [weak self] _ in self?.updateCapture() }
+        watcher.onFlagsChange = { [weak self] flags in
+            let shift = flags.contains(.maskShift)
+            self?.overlays.forEach { $0.overlayView.shiftHeld = shift }
+        }
         watcher.onTap = { count in
             // Fires on every tap, so a triple-tap undoes on the second tap and
             // clears on the third — same end state, no waiting for a timeout.
@@ -79,6 +83,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         overlays = NSScreen.screens.map(OverlayWindow.init(screen:))
         for window in overlays {
+            window.overlayView.shiftHeld = watcher.flags.contains(.maskShift)
             window.orderFrontRegardless()
         }
         Debug.log("overlays: \(overlays.map { "\($0.windowNumber)@\($0.frame)" })")
@@ -189,24 +194,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return menu
     }
 
-    /// Gesture and shortcut reference. `{m}` is replaced with the current
-    /// draw modifier's symbol. Entries are plain items with a no-op action so
-    /// they render in full contrast rather than greyed out.
-    private static let helpEntries: [String?] = [
-        "Draw a line:  hold {m} and drag",
-        "Move a line:  hold {m} and drag it",
-        "Reshape a line:  hold {m} and drag an endpoint handle (the other end stays put)",
-        "Stretch a line across the screen:  hold {m} and double-click it",
-        nil,
-        "Undo the last line:  double-tap {m}, or ⌃⌥⌘Z",
-        "Clear all lines:  triple-tap {m}, or ⌃⌥⌘C",
-        nil,
-        "Pause Aligner:  uncheck Enabled ({m}-clicks reach other apps again)",
-    ]
+    /// Gesture and shortcut reference (`nil` = separator). Entries are plain
+    /// items with a no-op action so they render in full contrast rather than
+    /// greyed out. The reshape wording depends on whether ⇧ is already part of
+    /// the draw modifier.
+    private static func helpEntries(for modifier: DrawModifier) -> [String?] {
+        let m = modifier.symbol
+        let reshape = modifier.flags.contains(.maskShift)
+            ? "Reshape a line:  hold \(m) and drag an endpoint handle; release ⇧ to move it freely, keep holding to snap to 45°"
+            : "Reshape a line:  hold \(m) and drag an endpoint handle; add ⇧ to snap to 45°"
+        return [
+            "Draw a line:  hold \(m) and drag",
+            "Move a line:  hold \(m) and drag it",
+            reshape,
+            "Stretch a line across the screen:  hold \(m) and double-click it",
+            nil,
+            "Undo the last line:  double-tap \(m), or ⌃⌥⌘Z",
+            "Clear all lines:  triple-tap \(m), or ⌃⌥⌘C",
+            nil,
+            "Pause Aligner:  uncheck Enabled (\(m)-clicks reach other apps again)",
+        ]
+    }
 
     private func helpMenu() -> NSMenu {
         let menu = NSMenu()
-        for entry in Self.helpEntries {
+        for entry in Self.helpEntries(for: modifier) {
             guard entry != nil else {
                 menu.addItem(.separator())
                 continue
@@ -235,9 +247,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func refreshMenuState() {
         let current = modifier
-        let entries = Self.helpEntries.compactMap { $0 }
+        let entries = Self.helpEntries(for: current).compactMap { $0 }
         for (item, entry) in zip(helpItems, entries) {
-            item.title = entry.replacingOccurrences(of: "{m}", with: current.symbol)
+            item.title = entry
         }
         enabledItem.state = isEnabled ? .on : .off
         for (candidate, item) in modifierItems {

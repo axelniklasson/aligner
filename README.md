@@ -22,7 +22,7 @@ Xcode project. No Accessibility / Input Monitoring permission is needed.
 | --- | --- |
 | Draw a line | Hold ⇧, click-drag, release |
 | Move a line | Hold ⇧, drag an existing line (cursor turns into a hand) |
-| Extend / shorten / re-angle a line | Hold ⇧, hover the line, drag one of its endpoint handles — the other end stays put and the dragged end snaps to 0/45/90° |
+| Extend / shorten / re-angle a line | Hold ⇧, hover the line, drag one of its endpoint handles — the other end stays put. Keep holding ⇧ to snap the dragged end to 0/45/90°, or release ⇧ mid-drag to move it freely (capture stays on until you let go of the mouse) |
 | Stretch a line across the screen | Hold ⇧, double-click the line |
 | Undo last line | **Double-tap ⇧**, menu-bar ╱ → *Undo Last Line*, or **⌃⌥⌘Z** anywhere |
 | Clear all lines | **Triple-tap ⇧**, menu-bar ╱ → *Clear All Lines*, or **⌃⌥⌘C** anywhere |
