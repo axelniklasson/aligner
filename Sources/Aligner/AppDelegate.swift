@@ -38,7 +38,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         watcher.required = modifier.flags
         watcher.onChange = { [weak self] _ in self?.updateCapture() }
-        watcher.onDoubleTap = { LineStore.shared.clear() }
+        watcher.onTap = { count in
+            // Fires on every tap, so a triple-tap undoes on the second tap and
+            // clears on the third — same end state, no waiting for a timeout.
+            switch count {
+            case 2: LineStore.shared.undo()
+            case 3: LineStore.shared.clear()
+            default: break
+            }
+        }
 
         buildStatusItem()
         rebuildOverlays()
@@ -104,7 +112,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let menu = NSMenu()
 
-        for _ in 0..<3 {
+        for _ in 0..<4 {
             let item = NSMenuItem()
             item.isEnabled = false
             menu.addItem(item)
@@ -204,7 +212,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let current = modifier
         hintItems[0].title = "Hold \(current.symbol) and drag to draw a line"
         hintItems[1].title = "Hold \(current.symbol) and drag a line to move it"
-        hintItems[2].title = "Double-tap \(current.symbol) to clear all lines"
+        hintItems[2].title = "Double-tap \(current.symbol) to undo the last line"
+        hintItems[3].title = "Triple-tap \(current.symbol) to clear all lines"
         enabledItem.state = isEnabled ? .on : .off
         for (candidate, item) in modifierItems {
             item.state = candidate == current ? .on : .off

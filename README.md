@@ -3,7 +3,8 @@
 A tiny macOS menu-bar app for eyeballing alignment in any app: hold **⇧ Shift**,
 then click-and-drag anywhere on screen to draw a red guide line. Lines snap to
 0° / 45° / 90° (like Preview) and stay on screen — on top of everything, across
-all Spaces and full-screen apps — until you double-tap ⇧ to clear them.
+all Spaces and full-screen apps — until you double-tap ⇧ to undo the last one
+or triple-tap ⇧ to clear them all.
 
 ## Build & run
 
@@ -21,8 +22,8 @@ Xcode project. No Accessibility / Input Monitoring permission is needed.
 | --- | --- |
 | Draw a line | Hold ⇧, click-drag, release |
 | Move a line | Hold ⇧, drag an existing line (cursor turns into a hand) |
-| Undo last line | Menu-bar ╱ → *Undo Last Line*, or **⌃⌥⌘Z** anywhere |
-| Clear all lines | **Double-tap ⇧**, menu-bar ╱ → *Clear All Lines*, or **⌃⌥⌘C** anywhere |
+| Undo last line | **Double-tap ⇧**, menu-bar ╱ → *Undo Last Line*, or **⌃⌥⌘Z** anywhere |
+| Clear all lines | **Triple-tap ⇧**, menu-bar ╱ → *Clear All Lines*, or **⌃⌥⌘C** anywhere |
 | Pause (make ⇧-clicks reach apps again) | Menu-bar ╱ → uncheck *Enabled* |
 | Use a different key | Menu-bar ╱ → *Draw While Holding* |
 | Change how new lines look | Menu-bar ╱ → *Color* / *Thickness* / *Style* |
@@ -50,10 +51,12 @@ global screen coordinates so they survive display changes.
   uncheck *Enabled* if that gets in the way.
 - Drawing mode needs the chosen modifier to be the only one held, so ⌘⇧
   shortcuts keep working.
-- A ⇧ tap only counts towards a double-tap if no key, click or scroll happened
-  while it was down, so typing "PR" won't wipe your lines. Both taps must fit
-  within 0.7 s. (JetBrains IDEs also use double-⇧ for *Search Everywhere*; that
-  will clear lines too.)
+- A ⇧ tap only counts towards a double/triple-tap if no key, click or scroll
+  happened while it was down, so typing "PR" won't touch your lines. Each tap
+  must be under 0.35 s with under 0.4 s between taps. A triple-tap undoes on
+  the second tap and clears on the third, so there's no delay waiting to see
+  whether a third tap is coming. (JetBrains IDEs also use double-⇧ for *Search
+  Everywhere*; that will undo a line too.)
 - To start it at login, add `Aligner.app` under *System Settings → General →
   Login Items*.
 

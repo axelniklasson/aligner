@@ -7,12 +7,13 @@ final class ModifierWatcher {
         didSet { poll() }
     }
     var onChange: ((Bool) -> Void)?
-    /// Fired when the modifier is tapped twice quickly with no other input.
-    var onDoubleTap: (() -> Void)?
+    /// Fired after each clean tap of the modifier with the length of the
+    /// current tap sequence (1 = single, 2 = double, 3 = triple, …).
+    var onTap: ((Int) -> Void)?
     private(set) var isHeld = false
 
     private var timer: Timer?
-    private var doubleTap = DoubleTapDetector()
+    private var taps = TapDetector()
     private static let relevant: CGEventFlags = [.maskShift, .maskControl, .maskAlternate, .maskCommand]
     private static let otherInputTypes: [CGEventType] = [
         .keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown, .scrollWheel,
@@ -41,14 +42,14 @@ final class ModifierWatcher {
         Debug.log("modifier held=\(held)")
         onChange?(held)
 
-        let tapped = doubleTap.update(
+        let count = taps.update(
             held: held,
             now: ProcessInfo.processInfo.systemUptime,
             otherInputSince: Self.otherInputOccurred(within:)
         )
-        if tapped {
-            Debug.log("double-tap")
-            onDoubleTap?()
+        if count > 0 {
+            Debug.log("tap x\(count)")
+            onTap?(count)
         }
     }
 
