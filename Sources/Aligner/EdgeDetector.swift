@@ -67,23 +67,7 @@ enum EdgeDetector {
 
         for (i, b) in (lo...hi).enumerated() where abs(b - position) <= radius {
             let s = stats[i]
-            guard s.meanAbs >= Double(p.extentStep) * 0.25 else { continue }
-
-            // Local maximum of the step magnitude.
-            let prev = i > 0 ? stats[i - 1].meanAbs : 0
-            let next = i + 1 < stats.count ? stats[i + 1].meanAbs : 0
-            guard s.meanAbs >= prev, s.meanAbs >= next, s.meanAbs > prev || s.meanAbs > next else { continue }
-
-            // Plateau: a run of similar boundaries means a gradient or a soft
-            // shadow, not an edge.
-            let similar = s.meanAbs * 0.6
-            var run = 1
-            var j = i - 1
-            while j >= 0, stats[j].meanAbs >= similar { run += 1; j -= 1 }
-            j = i + 1
-            while j < stats.count, stats[j].meanAbs >= similar { run += 1; j += 1 }
-            guard run < p.plateauRun else { continue }
-
+            guard isEdge(stats, at: i, p) else { continue }
             let (start, end) = axis.extent(boundary: b, from: along, sign: s.sign, p)
             guard end - start >= p.minExtent else { continue }
             results.append(DetectedEdge(
@@ -97,6 +81,74 @@ enum EdgeDetector {
         }
 
         return mergeAdjacent(results).sorted { abs($0.position - position) < abs($1.position - position) }
+    }
+
+    /// Edge segments lying exactly on `boundary` between `from` and `to` along
+    /// it — everything a line placed on that boundary runs along. Each run of
+    /// same-direction steps at least `minExtent` long is validated with the
+    /// same local-maximum / plateau test as `edges(in:...)`.
+    static func segments(
+        in map: EdgeMap,
+        orientation: DetectedEdge.Orientation,
+        boundary b: Int,
+        from: Int,
+        to: Int,
+        parameters p: Parameters = Parameters()
+    ) -> [DetectedEdge] {
+        let axis = Axis(map: map, horizontal: orientation == .horizontal)
+        guard b >= 1, b < axis.boundaryCount else { return [] }
+        let from = max(0, from), to = min(axis.alongCount - 1, to)
+        guard from <= to else { return [] }
+
+        var results: [DetectedEdge] = []
+        var runStart = -1, runEnd = 0, runSign = 0, misses = 0
+
+        func closeRun() {
+            defer { runStart = -1 }
+            guard runStart >= 0, runEnd - runStart >= p.minExtent else { return }
+            let margin = p.plateauRun + 1
+            let lo = max(1, b - margin), hi = min(axis.boundaryCount - 1, b + margin)
+            let stats = (lo...hi).map { axis.stats(boundary: $0, from: runStart, to: runEnd - 1, p) }
+            guard isEdge(stats, at: b - lo, p) else { return }
+            let s = stats[b - lo]
+            results.append(DetectedEdge(
+                orientation: orientation, position: b, start: runStart, end: runEnd,
+                step: Int(s.meanSigned.rounded()), strength: s.meanAbs
+            ))
+        }
+
+        for c in from...to {
+            let step = axis.step(boundary: b, along: c)
+            let sign = step >= p.extentStep ? 1 : (step <= -p.extentStep ? -1 : 0)
+            if sign != 0 {
+                if runStart >= 0, sign != runSign { closeRun() }
+                if runStart < 0 { runStart = c; runSign = sign }
+                runEnd = c + 1
+                misses = 0
+            } else if runStart >= 0 {
+                misses += 1
+                if misses > p.extentGap { closeRun() }
+            }
+        }
+        closeRun()
+        return results
+    }
+
+    /// Local maximum of the step magnitude that isn't part of a plateau (a run
+    /// of similar boundaries means a gradient or a soft shadow, not an edge).
+    private static func isEdge(_ stats: [Stats], at i: Int, _ p: Parameters) -> Bool {
+        let s = stats[i]
+        guard s.meanAbs >= Double(p.extentStep) * 0.25 else { return false }
+        let prev = i > 0 ? stats[i - 1].meanAbs : 0
+        let next = i + 1 < stats.count ? stats[i + 1].meanAbs : 0
+        guard s.meanAbs >= prev, s.meanAbs >= next, s.meanAbs > prev || s.meanAbs > next else { return false }
+        let similar = s.meanAbs * 0.6
+        var run = 1
+        var j = i - 1
+        while j >= 0, stats[j].meanAbs >= similar { run += 1; j -= 1 }
+        j = i + 1
+        while j < stats.count, stats[j].meanAbs >= similar { run += 1; j += 1 }
+        return run < p.plateauRun
     }
 
     /// An anti-aliased edge scores on two neighbouring boundaries; keep the stronger.

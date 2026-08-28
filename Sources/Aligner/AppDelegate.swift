@@ -485,18 +485,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// `ALIGNER_DEBUG_SNAPTEST=1`: drives the first overlay with synthesized
-    /// mouse events — a horizontal drag just below the menu bar's bottom edge
-    /// (pixel row 50 on the main display at 2×) — and logs whether the
-    /// committed line snapped flush to it, then repeats with ⌘ held.
+    /// mouse events — a horizontal drag just below the menu bar — and checks
+    /// that the committed line lands where `SnapEngine` says the nearest edge
+    /// is (computed on a fresh capture, so it doesn't depend on what's under
+    /// the menu bar), then repeats with ⌘ held to check the bypass.
     private func runSnapTest() {
         guard ProcessInfo.processInfo.environment["ALIGNER_DEBUG_SNAPTEST"] != nil,
               let window = overlays.first else { return }
         let view = window.overlayView
-        let scale = window.backingScaleFactor
-        let edgeY = window.frame.maxY - 25   // menu bar bottom, in points
-        let width = max(LineSettings.shared.style.width * scale, 1)
-        let expected = window.frame.maxY - (25 * scale + width / 2) / scale
-        Debug.log("snaptest: snapToEdges=\(view.snapToEdges) edge y=\(edgeY) expected flush y=\(expected)")
+        let raw = NSPoint(x: 600, y: window.frame.maxY - 29)
+        let width = LineSettings.shared.style.width
+        let excluded = overlays.map(\.windowNumber)
+        let displayID = window.displayID, frame = window.frame, scale = window.backingScaleFactor
 
         func event(_ type: NSEvent.EventType, _ point: NSPoint, _ flags: NSEvent.ModifierFlags) -> NSEvent {
             NSEvent.mouseEvent(
@@ -506,25 +506,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )!
         }
 
-        func drag(from a: NSPoint, to b: NSPoint, flags: NSEvent.ModifierFlags, label: String, then: @escaping () -> Void) {
+        func drag(from a: NSPoint, to b: NSPoint, flags: NSEvent.ModifierFlags, then: @escaping (Line?) -> Void) {
             let before = LineStore.shared.lines.count
             view.mouseDown(with: event(.leftMouseDown, a, flags))
             // Give the capture time to arrive before finishing the drag.
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                 view.mouseDragged(with: event(.leftMouseDragged, b, flags))
                 view.mouseUp(with: event(.leftMouseUp, b, flags))
-                if LineStore.shared.lines.count > before, let line = LineStore.shared.lines.last {
-                    Debug.log("snaptest \(label): raw y=\(a.y) -> committed start=\(line.start) end=\(line.end)")
-                } else {
-                    Debug.log("snaptest \(label): no line committed")
-                }
-                then()
+                then(LineStore.shared.lines.count > before ? LineStore.shared.lines.last : nil)
             }
         }
 
-        drag(from: NSPoint(x: 600, y: edgeY - 4), to: NSPoint(x: 900, y: edgeY - 4), flags: [.shift], label: "snap") {
-            // A different x range so the second drag doesn't grab the first line.
-            drag(from: NSPoint(x: 1200, y: edgeY - 4), to: NSPoint(x: 1500, y: edgeY - 4), flags: [.shift, .command], label: "bypass ⌘") {}
+        Task {
+            guard let map = try? await sampler.capture(displayID: displayID, frame: frame, scale: scale, excluding: excluded) else {
+                Debug.log("snaptest: capture failed"); return
+            }
+            let expected = SnapEngine.snap(map, orientation: .horizontal, value: raw.y, along: raw.x, flushWidth: width, side: raw.y)
+            await MainActor.run {
+                Debug.log("snaptest: snapToEdges=\(view.snapToEdges) raw y=\(raw.y) expected " +
+                          (expected.map { "y=\($0.value) (boundary \($0.edge.position))" } ?? "no edge in range"))
+                drag(from: raw, to: NSPoint(x: raw.x + 300, y: raw.y), flags: [.shift]) { line in
+                    let ok = line != nil && expected != nil && line!.start.y == expected!.value && line!.end.y == expected!.value
+                    Debug.log("snaptest snap: \(ok ? "PASS" : "FAIL") committed=\(line.map { "\($0.start)-\($0.end)" } ?? "none")")
+                    // A different x range so the second drag doesn't grab the first line.
+                    let raw2 = NSPoint(x: 1200, y: raw.y)
+                    drag(from: raw2, to: NSPoint(x: 1500, y: raw.y), flags: [.shift, .command]) { line in
+                        let ok = line != nil && line!.start.y == raw.y
+                        Debug.log("snaptest bypass ⌘: \(ok ? "PASS" : "FAIL") committed=\(line.map { "\($0.start)-\($0.end)" } ?? "none")")
+                    }
+                }
+            }
         }
     }
 

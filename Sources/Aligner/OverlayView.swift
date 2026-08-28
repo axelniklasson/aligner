@@ -35,6 +35,19 @@ final class OverlayView: NSView {
         }
     }
 
+    /// An edge to draw while dragging: the one snapped to, others lying on
+    /// the same boundary along the line, or near-misses within snap range
+    /// (with their offset from the line, in points).
+    struct EdgeHighlight {
+        enum Kind {
+            case snapped
+            case aligned
+            case nearMiss(CGFloat)
+        }
+        var edge: DetectedEdge
+        var kind: Kind
+    }
+
     private struct DragState {
         enum Kind {
             case draw(rawStart: NSPoint)
@@ -50,7 +63,7 @@ final class OverlayView: NSView {
         /// Mirrors ⌘ (inverted): hold ⌘ to skip edge snapping.
         var edgeSnap: Bool
         var preview: Line?
-        var edges: [DetectedEdge] = []
+        var highlights: [EdgeHighlight] = []
 
         var editingIndex: Int? {
             switch kind {
@@ -74,6 +87,7 @@ final class OverlayView: NSView {
     private static let activeHandleRadius: CGFloat = 6
     private static let handleHitRadius: CGFloat = 9
     private static let edgeHighlightColor = NSColor(srgbRed: 0, green: 0.8, blue: 1, alpha: 0.9)
+    private static let nearMissColor = NSColor(srgbRed: 1, green: 0.55, blue: 0, alpha: 0.95)
 
     var isDragging: Bool { drag != nil }
 
@@ -250,7 +264,7 @@ final class OverlayView: NSView {
         guard let state = drag else { return }
         drag = nil
         invalidate(state.preview)
-        invalidateEdges(state.edges)
+        invalidateHighlights(state.highlights)
 
         if let result = state.preview, Self.length(of: result) >= 2 {
             switch state.kind {
@@ -275,13 +289,16 @@ final class OverlayView: NSView {
     private func recomputePreview() {
         guard var state = drag, let window else { return }
         let previous = state.preview
-        let previousEdges = state.edges
+        let previousHighlights = state.highlights
         let map = state.edgeSnap ? edgeMap : nil
-        var edges: [DetectedEdge] = []
+        var highlights: [EdgeHighlight] = []
+        /// The edge the line itself was placed on (as opposed to an end
+        /// snapping to a crossing edge); the along-line scan follows it.
+        var lineEdge: DetectedEdge?
 
         func snap(_ point: NSPoint, to axis: DetectedEdge.Orientation, flush: CGFloat?, side: NSPoint) -> NSPoint? {
             guard let map, let (snapped, edge) = snapped(point, axis: axis, flushWidth: flush, side: side, map: map, window: window) else { return nil }
-            edges.append(edge)
+            highlights.append(EdgeHighlight(edge: edge, kind: .snapped))
             return snapped
         }
 
@@ -298,8 +315,14 @@ final class OverlayView: NSView {
             if horizontal || vertical || undecided {
                 // Flush against the edge the line runs along, exactly on the
                 // edge the line starts from.
-                if let p = snap(start, to: .horizontal, flush: (horizontal || undecided) ? style.width : nil, side: rawStart) { start.y = p.y }
-                if let p = snap(start, to: .vertical, flush: (vertical || undecided) ? style.width : nil, side: rawStart) { start.x = p.x }
+                if let p = snap(start, to: .horizontal, flush: (horizontal || undecided) ? style.width : nil, side: rawStart) {
+                    start.y = p.y
+                    if horizontal { lineEdge = highlights.last?.edge }
+                }
+                if let p = snap(start, to: .vertical, flush: (vertical || undecided) ? style.width : nil, side: rawStart) {
+                    start.x = p.x
+                    if vertical { lineEdge = highlights.last?.edge }
+                }
             }
             var end = NSPoint(x: probe.x + (start.x - rawStart.x), y: probe.y + (start.y - rawStart.y))
             if horizontal, let p = snap(end, to: .vertical, flush: nil, side: end) { end.x = p.x }
@@ -313,12 +336,14 @@ final class OverlayView: NSView {
                 if let p = snap(probe, to: .horizontal, flush: original.style.width, side: probe) {
                     moved.start.y = p.y
                     moved.end.y = p.y
+                    lineEdge = highlights.last?.edge
                 }
             } else if Self.isVertical(moved) {
                 let probe = NSPoint(x: moved.start.x, y: state.current.y)
                 if let p = snap(probe, to: .vertical, flush: original.style.width, side: probe) {
                     moved.start.x = p.x
                     moved.end.x = p.x
+                    lineEdge = highlights.last?.edge
                 }
             }
             state.preview = moved
@@ -341,12 +366,57 @@ final class OverlayView: NSView {
             state.preview = line
         }
 
-        state.edges = edges
+        if let map, let lineEdge, let preview = state.preview {
+            highlights += alongLineHighlights(for: preview, on: lineEdge, map: map, window: window)
+        }
+
+        state.highlights = highlights
         drag = state
         invalidate(previous)
         invalidate(state.preview)
-        invalidateEdges(previousEdges)
-        invalidateEdges(edges)
+        invalidateHighlights(previousHighlights)
+        invalidateHighlights(highlights)
+    }
+
+    /// Follows a line that was placed on `edge` along its whole span: every
+    /// other edge segment on the same boundary is reported as aligned, and
+    /// segments from other elements within snap range but off the boundary
+    /// as near-misses with their offset.
+    private func alongLineHighlights(for line: Line, on edge: DetectedEdge, map: EdgeMap, window: NSWindow) -> [EdgeHighlight] {
+        let horizontal = edge.orientation == .horizontal
+        let a = map.pixel(fromScreen: window.convertPoint(toScreen: convert(line.start, to: nil)))
+        let b = map.pixel(fromScreen: window.convertPoint(toScreen: convert(line.end, to: nil)))
+        let from = Int((horizontal ? min(a.x, b.x) : min(a.y, b.y)).rounded())
+        let to = Int((horizontal ? max(a.x, b.x) : max(a.y, b.y)).rounded())
+        var parameters = EdgeDetector.Parameters()
+        parameters.window = Int((SnapEngine.window * map.scale).rounded())
+        parameters.minExtent = Int((SnapEngine.minExtent * map.scale).rounded())
+
+        let onLine = EdgeDetector.segments(in: map, orientation: edge.orientation, boundary: edge.position, from: from, to: to, parameters: parameters)
+        var highlights: [EdgeHighlight] = onLine
+            .filter { !($0.start <= edge.start && $0.end >= edge.end) }   // the snapped edge is already shown
+            .map { EdgeHighlight(edge: $0, kind: .aligned) }
+
+        // Near-misses: other elements' edges within snap range. Anything
+        // overlapping an on-line segment is the same element (the other side
+        // of a border, an anti-aliasing neighbour) and is skipped.
+        let occupied = onLine + [edge]
+        let radius = Int((SnapEngine.radius * map.scale).rounded(.up))
+        var misses: [(DetectedEdge, Int)] = []
+        for offset in -radius...radius where offset != 0 {
+            for segment in EdgeDetector.segments(in: map, orientation: edge.orientation, boundary: edge.position + offset, from: from, to: to, parameters: parameters) {
+                let sameElement = occupied.contains { $0.start < segment.end && segment.start < $0.end }
+                guard !sameElement else { continue }
+                // Anti-aliased edges appear on two neighbouring boundaries; keep the stronger.
+                if let i = misses.firstIndex(where: { abs($0.1 - offset) <= 1 && $0.0.start < segment.end && segment.start < $0.0.end }) {
+                    if segment.strength > misses[i].0.strength { misses[i] = (segment, offset) }
+                } else {
+                    misses.append((segment, offset))
+                }
+            }
+        }
+        highlights += misses.map { EdgeHighlight(edge: $0.0, kind: .nearMiss(CGFloat($0.1) / map.scale)) }
+        return highlights
     }
 
     /// Snaps one coordinate of `point` (view coords) to the nearest edge of
@@ -372,6 +442,7 @@ final class OverlayView: NSView {
         ) else { return nil }
         var snappedScreen = screenPoint
         if horizontal { snappedScreen.y = result.value } else { snappedScreen.x = result.value }
+        Debug.log("snap \(axis) value=\(horizontal ? screenPoint.y : screenPoint.x) flush=\(String(describing: flushWidth)) side=\(horizontal ? screenSide.y : screenSide.x) -> boundary \(result.edge.position) [\(result.edge.start)-\(result.edge.end)] step \(result.edge.step) => \(result.value)")
         return (convert(window.convertPoint(fromScreen: snappedScreen), from: nil), result.edge)
     }
 
@@ -458,12 +529,12 @@ final class OverlayView: NSView {
         setNeedsDisplay(rect.insetBy(dx: -margin, dy: -margin))
     }
 
-    private func invalidateEdges(_ edges: [DetectedEdge]) {
-        guard !edges.isEmpty, let map = edgeMap, let window else { return }
-        for edge in edges {
-            let (a, b) = edgeEndpoints(edge, map: map, window: window)
+    private func invalidateHighlights(_ highlights: [EdgeHighlight]) {
+        guard !highlights.isEmpty, let map = edgeMap, let window else { return }
+        for highlight in highlights {
+            let (a, b) = edgeEndpoints(highlight.edge, map: map, window: window)
             let rect = NSRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(b.x - a.x), height: abs(b.y - a.y))
-            setNeedsDisplay(rect.insetBy(dx: -10, dy: -10))
+            setNeedsDisplay(rect.insetBy(dx: -40, dy: -40))   // room for offset labels
         }
     }
 
@@ -512,9 +583,9 @@ final class OverlayView: NSView {
             drawHandles(for: local, active: active, in: context)
         }
 
-        if let edges = drag?.edges, !edges.isEmpty, let map = edgeMap {
-            for edge in edges {
-                drawEdgeHighlight(edge, map: map, window: window, in: context)
+        if let highlights = drag?.highlights, !highlights.isEmpty, let map = edgeMap {
+            for highlight in highlights {
+                drawEdgeHighlight(highlight, map: map, window: window, in: context)
             }
         }
     }
@@ -579,13 +650,21 @@ final class OverlayView: NSView {
         }
     }
 
-    /// Marks the element edge the drag snapped to along its detected extent,
-    /// with a tick at each end.
-    private func drawEdgeHighlight(_ edge: DetectedEdge, map: EdgeMap, window: NSWindow, in context: CGContext) {
+    /// Marks an element edge along its detected extent with a tick at each
+    /// end: cyan for the edge snapped to and others on the same line, orange
+    /// with an offset label for near-misses.
+    private func drawEdgeHighlight(_ highlight: EdgeHighlight, map: EdgeMap, window: NSWindow, in context: CGContext) {
+        let edge = highlight.edge
         let (a, b) = edgeEndpoints(edge, map: map, window: window)
+        var color = Self.edgeHighlightColor
+        var offset: CGFloat?
+        if case .nearMiss(let value) = highlight.kind {
+            color = Self.nearMissColor
+            offset = value
+        }
         context.setLineDash(phase: 0, lengths: [])
         context.setLineCap(.butt)
-        context.setStrokeColor(Self.edgeHighlightColor.cgColor)
+        context.setStrokeColor(color.cgColor)
         context.setLineWidth(2)
         context.move(to: a)
         context.addLine(to: b)
@@ -602,6 +681,35 @@ final class OverlayView: NSView {
             }
         }
         context.strokePath()
+
+        if let offset {
+            // Label on the far side of the segment from the line. Pixel rows
+            // grow downwards, so a positive offset means below / to the right.
+            let mid = NSPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2)
+            let away: CGFloat = 14
+            let at: NSPoint
+            if edge.orientation == .horizontal {
+                at = NSPoint(x: mid.x, y: offset > 0 ? mid.y - away : mid.y + away)
+            } else {
+                at = NSPoint(x: offset > 0 ? mid.x + away : mid.x - away, y: mid.y)
+            }
+            let magnitude = abs(offset)
+            let text = magnitude == magnitude.rounded() ? "\(Int(magnitude)) pt off" : String(format: "%.1f pt off", magnitude)
+            drawLabel(text, centeredAt: at, color: color)
+        }
+    }
+
+    private func drawLabel(_ text: String, centeredAt point: NSPoint, color: NSColor) {
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 10, weight: .semibold),
+            .foregroundColor: NSColor.white,
+        ]
+        let string = NSAttributedString(string: text, attributes: attributes)
+        let size = string.size()
+        let rect = NSRect(x: point.x - size.width / 2 - 5, y: point.y - size.height / 2 - 2, width: size.width + 10, height: size.height + 4)
+        color.setFill()
+        NSBezierPath(roundedRect: rect, xRadius: 4, yRadius: 4).fill()
+        string.draw(at: NSPoint(x: rect.minX + 5, y: rect.minY + 2))
     }
 
     /// Aligns a coordinate so a `width`-wide stroke centred on it covers whole
