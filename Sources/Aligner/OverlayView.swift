@@ -339,8 +339,9 @@ final class OverlayView: NSView {
             stroke(local, in: context, scale: scale)
         }
 
+        // The halo is only a "close enough to grab" cue while hovering; once a
+        // line is grabbed the handles are enough.
         if let preview = previewLine {
-            if editingIndex != nil { strokeHalo(preview, in: context, scale: scale) }
             stroke(preview, in: context, scale: scale)
             if case .resize(_, _, let end, _, _) = drag {
                 drawHandles(for: preview, active: end, in: context)
