@@ -68,7 +68,8 @@ final class OverlayView: NSView {
     private var edgeMapTime: TimeInterval = 0
     private var captureInFlight = false
 
-    private static let haloWidth: CGFloat = 6
+    private static let haloWidth: CGFloat = 4
+    private static let haloAlpha: CGFloat = 0.14
     private static let handleRadius: CGFloat = 4.5
     private static let activeHandleRadius: CGFloat = 6
     private static let handleHitRadius: CGFloat = 9
@@ -557,7 +558,7 @@ final class OverlayView: NSView {
         context.setLineDash(phase: 0, lengths: [])
         context.setLineCap(.round)
         context.setLineWidth(max(line.style.width, 1 / scale) + Self.haloWidth)
-        context.setStrokeColor(line.style.color.withAlphaComponent(0.3).cgColor)
+        context.setStrokeColor(line.style.color.withAlphaComponent(Self.haloAlpha).cgColor)
         context.move(to: line.start)
         context.addLine(to: line.end)
         context.strokePath()
