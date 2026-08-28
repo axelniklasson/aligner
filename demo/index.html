@@ -1,0 +1,468 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aligner demo — Northwind Console</title>
+<style>
+  :root {
+    --bg: #f5f5f7;
+    --surface: #ffffff;
+    --border: #e3e3e8;
+    --border-strong: #d2d2d7;
+    --text: #1d1d1f;
+    --text-2: #6e6e73;
+    --text-3: #a1a1a6;
+    --accent: #5856d6;
+    --accent-2: #0a84ff;
+    --green: #34c759;
+    --red: #ff3b30;
+    --orange: #ff9f0a;
+    --shadow: 0 1px 2px rgba(0,0,0,.04), 0 6px 20px rgba(0,0,0,.05);
+    --radius: 12px;
+    --radius-sm: 8px;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Inter, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    color-scheme: light;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); color: var(--text); }
+  body { font-size: 14px; line-height: 1.45; }
+  a { color: inherit; text-decoration: none; }
+  button, input { font: inherit; color: inherit; }
+
+  /* ---------- Top bar ---------- */
+  .topbar {
+    height: 56px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center;
+    padding: 0 32px;
+    gap: 32px;
+    position: sticky; top: 0; z-index: 10;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 15px; letter-spacing: -0.01em; }
+  .brand .mark {
+    width: 28px; height: 28px; border-radius: 8px;
+    background: linear-gradient(135deg, #6e6bff, #5856d6);
+    display: grid; place-items: center; color: #fff;
+  }
+  .nav { display: flex; align-items: center; gap: 4px; }
+  .nav a {
+    display: inline-flex; align-items: center; height: 32px; padding: 0 12px;
+    border-radius: 8px; color: var(--text-2); font-weight: 500;
+  }
+  .nav a[aria-current] { color: var(--text); background: var(--bg); }
+  .topbar .spacer { flex: 1; }
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    height: 34px; padding: 0 14px; border-radius: 9px;
+    border: 1px solid var(--border-strong); background: var(--surface);
+    font-weight: 500; cursor: pointer; white-space: nowrap;
+  }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { filter: brightness(1.05); }
+  .btn.ghost { border-color: transparent; background: transparent; }
+
+  /* ---------- Layout ---------- */
+  .page { max-width: 1120px; margin: 0 auto; padding: 40px 32px 96px; }
+  .section-title { font-size: 13px; font-weight: 600; color: var(--text-2); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 14px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    box-shadow: var(--shadow);
+  }
+
+  /* ---------- Hero ---------- */
+  .hero {
+    display: grid; grid-template-columns: 1.2fr 1fr; gap: 40px; align-items: center;
+    padding: 36px 0 44px;
+  }
+  .hero h1 { font-size: 40px; line-height: 1.1; letter-spacing: -0.03em; font-weight: 700; margin-bottom: 14px; }
+  .hero h1 em { font-style: normal; background: linear-gradient(90deg, #5856d6, #0a84ff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .hero p { font-size: 16px; color: var(--text-2); max-width: 52ch; margin-bottom: 22px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px 0 8px;
+    border-radius: 999px; background: var(--surface); border: 1px solid var(--border); font-size: 13px; color: var(--text-2);
+  }
+  .chip kbd {
+    font-family: inherit; font-size: 12px; font-weight: 600; color: var(--text);
+    background: var(--bg); border: 1px solid var(--border-strong); border-bottom-width: 2px;
+    border-radius: 6px; padding: 1px 6px; min-width: 22px; text-align: center;
+  }
+  .hero-art {
+    height: 260px; border-radius: 16px; position: relative; overflow: hidden;
+    background: radial-gradient(120% 90% at 20% 10%, #eef0ff 0%, #f7f7fb 45%, #eaf3ff 100%);
+    border: 1px solid var(--border);
+  }
+  .hero-art .win {
+    position: absolute; left: 36px; top: 40px; right: 36px; bottom: -20px;
+    background: #fff; border-radius: 12px 12px 0 0; border: 1px solid var(--border);
+    box-shadow: 0 20px 50px rgba(88,86,214,.12);
+  }
+  .hero-art .win .bar { height: 34px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 6px; padding: 0 12px; }
+  .hero-art .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--border-strong); }
+  .hero-art .rows { padding: 16px; display: grid; gap: 10px; }
+  .hero-art .row { height: 12px; border-radius: 6px; background: var(--bg); }
+  .hero-art .row.w1 { width: 62%; } .hero-art .row.w2 { width: 84%; } .hero-art .row.w3 { width: 45%; }
+  .hero-art .guide { position: absolute; left: 0; right: 0; height: 2px; background: #ff3b30; top: 74px; opacity: .9; }
+  .hero-art .guide.v { left: 88px; top: 0; bottom: 0; width: 2px; height: auto; }
+
+  /* ---------- Stats ---------- */
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 40px; }
+  .stat { padding: 18px 18px 18px; display: flex; flex-direction: column; gap: 14px; }
+  .stat .head { display: flex; align-items: center; justify-content: space-between; }
+  .stat .label { color: var(--text-2); font-weight: 500; }
+  .icon-box {
+    width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center;
+    background: #eef0ff; color: var(--accent);
+  }
+  .icon-box.green { background: #e9f9ee; color: #248a3d; }
+  .icon-box.orange { background: #fff3e0; color: #c77700; }
+  .icon-box.blue { background: #e7f2ff; color: #0a6ad6; }
+  .stat .value { font-size: 28px; font-weight: 700; letter-spacing: -0.02em; line-height: 1; }
+  .delta {
+    display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: 999px;
+    font-size: 12px; font-weight: 600; width: fit-content;
+  }
+  .delta.up { background: #e9f9ee; color: #1f7a36; }
+  .delta.down { background: #ffecea; color: #c0281c; }
+
+  /* ---------- Two column ---------- */
+  .two { display: grid; grid-template-columns: 1.6fr 1fr; gap: 24px; margin-bottom: 40px; align-items: start; }
+
+  /* Table */
+  .table { overflow: hidden; }
+  .table .toolbar { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  .table .toolbar h3 { font-size: 15px; font-weight: 600; }
+  .table .filters { display: flex; gap: 6px; }
+  .table .filters .btn { height: 28px; padding: 0 10px; font-size: 13px; border-radius: 7px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 12px; font-weight: 600; color: var(--text-2); padding: 10px 16px; border-bottom: 1px solid var(--border); background: #fafafc; }
+  td { padding: 0 16px; height: 52px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  tr:last-child td { border-bottom: 0; }
+  .who { display: flex; align-items: center; gap: 10px; }
+  .avatar {
+    width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center;
+    font-size: 11px; font-weight: 700; color: #fff; flex: 0 0 auto;
+  }
+  .who .name { font-weight: 500; }
+  .who .mail { font-size: 12px; color: var(--text-2); }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px; border-radius: 999px;
+    font-size: 12px; font-weight: 600; border: 1px solid transparent;
+  }
+  .pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .pill.ok { background: #e9f9ee; color: #1f7a36; }
+  .pill.warn { background: #fff3e0; color: #a35f00; }
+  .pill.off { background: #f0f0f3; color: var(--text-2); }
+  .mono { font-family: "SF Mono", ui-monospace, Menlo, monospace; font-size: 12px; color: var(--text-2); }
+  .bar-cell { display: flex; align-items: center; gap: 10px; }
+  .meter { flex: 1; height: 6px; border-radius: 3px; background: #ececf1; overflow: hidden; }
+  .meter i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+
+  /* Form */
+  .form { padding: 20px; }
+  .form h3 { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+  .form .sub { color: var(--text-2); margin-bottom: 18px; }
+  .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+  .field label { font-size: 13px; font-weight: 500; }
+  .input {
+    height: 36px; border-radius: 9px; border: 1px solid var(--border-strong); background: #fff;
+    padding: 0 12px; outline: none; width: 100%;
+  }
+  .input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(88,86,214,.15); }
+  .seg { display: grid; grid-template-columns: 1fr 1fr 1fr; border: 1px solid var(--border-strong); border-radius: 9px; overflow: hidden; height: 36px; }
+  .seg button { border: 0; background: #fff; cursor: pointer; color: var(--text-2); font-weight: 500; }
+  .seg button + button { border-left: 1px solid var(--border-strong); }
+  .seg button.on { background: var(--bg); color: var(--text); }
+  .form .actions { display: flex; gap: 10px; margin-top: 6px; }
+  .form .actions .btn { flex: 1; }
+
+  /* ---------- Dark settings ---------- */
+  .dark {
+    --surface: #1c1c1e; --bg: #131315; --border: #2c2c2e; --border-strong: #3a3a3c;
+    --text: #f5f5f7; --text-2: #98989d; --text-3: #636366;
+    background: var(--bg); color: var(--text);
+    border-radius: 16px; padding: 28px; margin-bottom: 40px;
+    color-scheme: dark;
+  }
+  .dark .section-title { color: var(--text-2); }
+  .settings { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .setting-group { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .setting { display: flex; align-items: center; gap: 14px; padding: 0 16px; height: 56px; border-bottom: 1px solid var(--border); }
+  .setting:last-child { border-bottom: 0; }
+  .setting .s-icon { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; background: #2c2c2e; color: #c7c7cc; flex: 0 0 auto; }
+  .setting .s-text { flex: 1; }
+  .setting .s-text b { display: block; font-weight: 500; }
+  .setting .s-text span { font-size: 12px; color: var(--text-2); }
+  .toggle { width: 42px; height: 26px; border-radius: 13px; background: #3a3a3c; position: relative; flex: 0 0 auto; }
+  .toggle.on { background: var(--green); }
+  .toggle::before { content: ""; position: absolute; top: 2px; left: 2px; width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+  .toggle.on::before { left: 18px; }
+
+  /* ---------- Prose ---------- */
+  .prose { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-bottom: 40px; }
+  .prose h2 { font-size: 24px; letter-spacing: -0.02em; margin-bottom: 12px; }
+  .prose p { color: var(--text-2); font-size: 15px; margin-bottom: 12px; }
+  .prose blockquote { border-left: 3px solid var(--accent); padding: 4px 0 4px 16px; color: var(--text); font-size: 16px; margin: 18px 0; }
+  .prose .cta { margin-top: 12px; }
+  .gallery { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .tile { aspect-ratio: 1; border-radius: 12px; background: var(--surface); border: 1px solid var(--border); display: grid; place-items: center; color: var(--text-3); font-size: 12px; }
+  .tile.a { background: linear-gradient(160deg, #eef0ff, #f7f7fb); }
+  .tile.b { background: linear-gradient(160deg, #e9f9ee, #f6fdf8); }
+  .tile.c { background: linear-gradient(160deg, #fff3e0, #fffaf2); }
+
+  footer { color: var(--text-3); font-size: 12px; display: flex; justify-content: space-between; border-top: 1px solid var(--border); padding-top: 20px; }
+
+  /* ---------- Reveal mode ---------- */
+  .reveal-toggle {
+    position: fixed; right: 24px; bottom: 24px; z-index: 20;
+    height: 40px; padding: 0 16px 0 12px; border-radius: 999px; border: 0;
+    background: #1d1d1f; color: #fff; font-weight: 600; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18);
+  }
+  .reveal-toggle .n { background: rgba(255,255,255,.18); border-radius: 999px; padding: 1px 8px; font-size: 12px; }
+  body.reveal .reveal-toggle { background: var(--red); }
+  body.reveal [data-flaw] { outline: 2px solid var(--red); outline-offset: 2px; position: relative; }
+  body.reveal [data-flaw]::after {
+    content: attr(data-flaw); position: absolute; left: 0; bottom: 100%; margin-bottom: 6px;
+    background: var(--red); color: #fff; font-size: 11px; font-weight: 600; line-height: 1;
+    padding: 5px 7px; border-radius: 6px; white-space: nowrap; z-index: 30; pointer-events: none;
+    font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; letter-spacing: 0;
+  }
+  /* Label placement per context: below for the sticky top bar, beside for
+     badges and toggles (which sit in clipped containers), below for prose. */
+  body.reveal .topbar [data-flaw]::after,
+  body.reveal .flaw-label-below[data-flaw]::after { bottom: auto; top: 100%; margin-bottom: 0; margin-top: 6px; }
+  body.reveal .flaw-label-right[data-flaw]::after { bottom: auto; left: calc(100% + 8px); top: 50%; transform: translateY(-50%); margin-bottom: 0; }
+  body.reveal .toggle[data-flaw]::after { bottom: auto; left: auto; right: calc(100% + 10px); top: 50%; transform: translateY(-50%); margin-bottom: 0; }
+  .reveal-note { display: none; position: fixed; left: 24px; bottom: 24px; z-index: 20; background: #1d1d1f; color: #fff; padding: 10px 14px; border-radius: 10px; font-size: 13px; max-width: 360px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+  body.reveal .reveal-note { display: block; }
+
+  /* ================================================================
+     THE PLANTED FLAWS. Everything below nudges one element by 1–2 px.
+     Remove this block and the page is pixel-perfect.
+     ================================================================ */
+  .flaw-nav-low          { transform: translateY(1px); }                  /* nav link 1px low */
+  .flaw-btn-tall         { height: 35px; }                                /* button 1px taller than its sibling */
+  .flaw-icon-high        { transform: translateY(-1px); }                 /* stat icon 1px high */
+  .flaw-delta-right      { margin-left: 2px; }                            /* delta badge 2px right */
+  .flaw-card-tall        { padding-bottom: 20px; }                        /* card 2px taller */
+  .flaw-th-left          { padding-left: 14px; }                          /* column header 2px left of its cells */
+  .flaw-avatar-low       { transform: translateY(1px); }                  /* avatar 1px low */
+  .flaw-pill-low         { transform: translateY(1px); }                  /* status pill 1px low */
+  .flaw-input-right      { margin-left: 1px; width: calc(100% - 1px); }   /* input 1px right */
+  .flaw-btn-left         { margin-left: -1px; }                           /* primary button 1px left */
+  .flaw-toggle-left      { margin-right: 2px; }                           /* toggle 2px left of the others */
+  .flaw-para-indent      { padding-left: 1px; }                           /* paragraph 1px in from the heading */
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <a class="brand" href="#">
+    <span class="mark" aria-hidden="true">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 13 13 3"/><circle cx="3" cy="13" r="1.5" fill="currentColor" stroke="none"/><circle cx="13" cy="3" r="1.5" fill="currentColor" stroke="none"/></svg>
+    </span>
+    Northwind Console
+  </a>
+  <nav class="nav">
+    <a href="#" aria-current="page">Overview</a>
+    <a href="#">Deploys</a>
+    <a href="#" class="flaw-nav-low" data-flaw="1px low">Pricing</a>
+    <a href="#">Docs</a>
+  </nav>
+  <div class="spacer"></div>
+  <button class="btn ghost">Sign in</button>
+  <button class="btn primary flaw-btn-tall" data-flaw="1px taller than Sign in">Get started</button>
+</header>
+
+<main class="page">
+
+  <section class="hero">
+    <div>
+      <h1>Find the pixel<br>that's <em>off.</em></h1>
+      <p>This page looks fine. It isn't — twelve elements are nudged by one or two pixels. Hold <b>⇧</b> and drag across the screen to lay a guide; it snaps to the nearest edge and shows you what it locked onto.</p>
+      <div class="chips">
+        <span class="chip"><kbd>⇧</kbd> drag to draw a guide</span>
+        <span class="chip"><kbd>⇧</kbd> drag a line or its handle to move it</span>
+        <span class="chip"><kbd>⌘</kbd> hold mid-drag to skip snapping</span>
+        <span class="chip"><kbd>⇧⇧</kbd> undo</span>
+        <span class="chip"><kbd>⇧⇧⇧</kbd> clear</span>
+      </div>
+    </div>
+    <div class="hero-art" aria-hidden="true">
+      <div class="win">
+        <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+        <div class="rows"><div class="row w1"></div><div class="row w2"></div><div class="row w3"></div><div class="row w2"></div></div>
+      </div>
+      <div class="guide"></div>
+      <div class="guide v"></div>
+    </div>
+  </section>
+
+  <div class="section-title">Last 30 days</div>
+  <section class="stats">
+    <div class="card stat">
+      <div class="head"><span class="label">Revenue</span>
+        <span class="icon-box"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12l4-4 3 3 5-6"/><path d="M11 5h3v3"/></svg></span>
+      </div>
+      <div class="value">$48,210</div>
+      <span class="delta up">▲ 12.4%</span>
+    </div>
+    <div class="card stat">
+      <div class="head"><span class="label">Active users</span>
+        <span class="icon-box blue flaw-icon-high" data-flaw="icon 1px high"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="6" cy="5.5" r="2.5"/><path d="M1.5 13c.5-2.5 2.4-4 4.5-4s4 1.5 4.5 4"/><circle cx="11.5" cy="6" r="2"/><path d="M11 9.5c1.8 0 3.2 1.3 3.5 3.5"/></svg></span>
+      </div>
+      <div class="value">9,317</div>
+      <span class="delta up">▲ 3.1%</span>
+    </div>
+    <div class="card stat">
+      <div class="head"><span class="label">Conversion</span>
+        <span class="icon-box green"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 13 13 3"/><circle cx="4.5" cy="4.5" r="1.8"/><circle cx="11.5" cy="11.5" r="1.8"/></svg></span>
+      </div>
+      <div class="value">4.82%</div>
+      <span class="delta up flaw-delta-right flaw-label-right" data-flaw="badge 2px right">▲ 0.6 pt</span>
+    </div>
+    <div class="card stat flaw-card-tall" data-flaw="card 2px taller">
+      <div class="head"><span class="label">Churn</span>
+        <span class="icon-box orange"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4l4 4 3-3 5 6"/><path d="M11 11h3V8"/></svg></span>
+      </div>
+      <div class="value">1.9%</div>
+      <span class="delta down">▼ 0.3 pt</span>
+    </div>
+  </section>
+
+  <section class="two">
+    <div class="card table">
+      <div class="toolbar">
+        <h3>Recent deploys</h3>
+        <div class="filters"><button class="btn">All</button><button class="btn">Production</button><button class="btn">Preview</button></div>
+      </div>
+      <table>
+        <thead>
+          <tr><th>Service</th><th>Author</th><th class="flaw-th-left" data-flaw="header 2px left of cells">Status</th><th>Rollout</th><th>Commit</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>api-gateway</b></td>
+            <td><div class="who"><span class="avatar" style="background:#5856d6">AN</span><div><div class="name">Axel N.</div><div class="mail">2 min ago</div></div></div></td>
+            <td><span class="pill ok">Live</span></td>
+            <td><div class="bar-cell"><div class="meter"><i style="width:100%"></i></div><span class="mono">100%</span></div></td>
+            <td class="mono">e50833a</td>
+          </tr>
+          <tr>
+            <td><b>billing-worker</b></td>
+            <td><div class="who"><span class="avatar flaw-avatar-low" data-flaw="avatar 1px low" style="background:#0a84ff">JS</span><div><div class="name">Jamie S.</div><div class="mail">14 min ago</div></div></div></td>
+            <td><span class="pill warn">Canary</span></td>
+            <td><div class="bar-cell"><div class="meter"><i style="width:35%"></i></div><span class="mono">35%</span></div></td>
+            <td class="mono">c1a245d</td>
+          </tr>
+          <tr>
+            <td><b>web</b></td>
+            <td><div class="who"><span class="avatar" style="background:#34c759">PR</span><div><div class="name">Priya R.</div><div class="mail">1 hr ago</div></div></div></td>
+            <td><span class="pill ok flaw-pill-low" data-flaw="pill 1px low">Live</span></td>
+            <td><div class="bar-cell"><div class="meter"><i style="width:100%"></i></div><span class="mono">100%</span></div></td>
+            <td class="mono">6840034</td>
+          </tr>
+          <tr>
+            <td><b>search-indexer</b></td>
+            <td><div class="who"><span class="avatar" style="background:#ff9f0a">MK</span><div><div class="name">Mina K.</div><div class="mail">3 hr ago</div></div></div></td>
+            <td><span class="pill off">Paused</span></td>
+            <td><div class="bar-cell"><div class="meter"><i style="width:0%"></i></div><span class="mono">0%</span></div></td>
+            <td class="mono">3de7755</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <form class="card form" onsubmit="return false">
+      <h3>Invite a teammate</h3>
+      <div class="sub">They'll get access to all projects in this workspace.</div>
+      <div class="field"><label for="name">Name</label><input class="input" id="name" placeholder="Ada Lovelace"></div>
+      <div class="field"><label for="email">Email</label><input class="input flaw-input-right" data-flaw="input 1px right" id="email" placeholder="ada@northwind.dev"></div>
+      <div class="field"><label>Role</label>
+        <div class="seg"><button type="button">Viewer</button><button type="button" class="on">Editor</button><button type="button">Admin</button></div>
+      </div>
+      <div class="actions"><button type="button" class="btn">Cancel</button><button type="button" class="btn primary flaw-btn-left" data-flaw="button 1px left">Send invite</button></div>
+    </form>
+  </section>
+
+  <section class="dark">
+    <div class="section-title">Workspace settings</div>
+    <div class="settings">
+      <div class="setting-group">
+        <div class="setting">
+          <span class="s-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 2v2M8 12v2M2 8h2M12 8h2M3.8 3.8l1.4 1.4M10.8 10.8l1.4 1.4M3.8 12.2l1.4-1.4M10.8 5.2l1.4-1.4"/><circle cx="8" cy="8" r="2.5"/></svg></span>
+          <div class="s-text"><b>Match system appearance</b><span>Switch themes with macOS</span></div>
+          <span class="toggle on"></span>
+        </div>
+        <div class="setting">
+          <span class="s-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2 3 4.5v4c0 3 2.2 4.8 5 5.5 2.8-.7 5-2.5 5-5.5v-4z"/></svg></span>
+          <div class="s-text"><b>Require two-factor auth</b><span>For all members of the workspace</span></div>
+          <span class="toggle on"></span>
+        </div>
+        <div class="setting">
+          <span class="s-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 4h10M3 8h10M3 12h6"/></svg></span>
+          <div class="s-text"><b>Compact tables</b><span>Denser rows in list views</span></div>
+          <span class="toggle flaw-toggle-left" data-flaw="toggle 2px left"></span>
+        </div>
+      </div>
+      <div class="setting-group">
+        <div class="setting">
+          <span class="s-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11.5V4.5A1.5 1.5 0 0 1 4.5 3h7A1.5 1.5 0 0 1 13 4.5v5a1.5 1.5 0 0 1-1.5 1.5H6l-3 2.5z"/></svg></span>
+          <div class="s-text"><b>Deploy notifications</b><span>Slack #deploys</span></div>
+          <span class="toggle on"></span>
+        </div>
+        <div class="setting">
+          <span class="s-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 8c2-3.5 4-5 6-5s4 1.5 6 5c-2 3.5-4 5-6 5s-4-1.5-6-5z"/><circle cx="8" cy="8" r="2"/></svg></span>
+          <div class="s-text"><b>Public status page</b><span>status.northwind.dev</span></div>
+          <span class="toggle"></span>
+        </div>
+        <div class="setting">
+          <span class="s-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 3v5l3 2"/><circle cx="8" cy="8" r="6"/></svg></span>
+          <div class="s-text"><b>Auto-pause idle previews</b><span>After 30 minutes</span></div>
+          <span class="toggle on"></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="prose">
+    <div>
+      <h2>Why one pixel matters</h2>
+      <p class="flaw-para-indent flaw-label-below" data-flaw="paragraph 1px in">Interfaces earn trust through consistency. A button that sits a pixel lower than its neighbour, a badge that drifts two pixels right, a column header that doesn't line up with its cells — none of them register consciously, but together they make a product feel hand-assembled rather than designed.</p>
+      <blockquote>“Alignment is the cheapest polish there is. It costs nothing but attention.”</blockquote>
+      <p>Aligner lets you check that attention was paid, in any app, without opening an inspector.</p>
+      <div class="cta"><button class="btn primary">Read the guide</button></div>
+    </div>
+    <div class="gallery">
+      <div class="tile a">Grid</div><div class="tile b">Type</div><div class="tile c">Color</div>
+      <div class="tile">Motion</div><div class="tile a">Icons</div><div class="tile b">Spacing</div>
+    </div>
+  </section>
+
+  <footer>
+    <span>Northwind Console · demo page for Aligner</span>
+    <span>Twelve intentional misalignments · press R or use the button to reveal</span>
+  </footer>
+</main>
+
+<div class="reveal-note">Red outlines mark the planted misalignments. Draw a guide along a correct sibling first, then look at the outlined element.</div>
+<button class="reveal-toggle" type="button" onclick="document.body.classList.toggle('reveal')">
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 8c2-3.5 4-5 6-5s4 1.5 6 5c-2 3.5-4 5-6 5s-4-1.5-6-5z"/><circle cx="8" cy="8" r="2"/></svg>
+  Reveal misalignments <span class="n" id="count"></span>
+</button>
+<script>
+  document.getElementById('count').textContent = document.querySelectorAll('[data-flaw]').length;
+  if (location.hash === '#reveal') document.body.classList.add('reveal');
+  addEventListener('keydown', e => {
+    if (e.key === 'r' || e.key === 'R') {
+      if (e.target.tagName === 'INPUT') return;
+      document.body.classList.toggle('reveal');
+    }
+  });
+</script>
+</body>
+</html>
