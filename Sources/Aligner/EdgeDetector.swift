@@ -151,11 +151,13 @@ enum EdgeDetector {
         return run < p.plateauRun
     }
 
-    /// An anti-aliased edge scores on two neighbouring boundaries; keep the stronger.
+    /// An anti-aliased edge scores on two neighbouring boundaries stepping the
+    /// same way; keep the stronger. Opposite steps 1 px apart are the two real
+    /// sides of a hairline and both stay.
     private static func mergeAdjacent(_ edges: [DetectedEdge]) -> [DetectedEdge] {
         var merged: [DetectedEdge] = []
         for edge in edges.sorted(by: { $0.position < $1.position }) {
-            if let last = merged.last, edge.position - last.position <= 1 {
+            if let last = merged.last, edge.position - last.position <= 1, (edge.step >= 0) == (last.step >= 0) {
                 if edge.strength > last.strength { merged[merged.count - 1] = edge }
             } else {
                 merged.append(edge)

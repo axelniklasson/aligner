@@ -9,6 +9,11 @@ let package = Package(
             name: "Aligner",
             path: "Sources/Aligner",
             linkerSettings: [.linkedFramework("Carbon")]
-        )
+        ),
+        .testTarget(
+            name: "AlignerTests",
+            dependencies: ["Aligner"],
+            path: "Tests/AlignerTests"
+        ),
     ]
 )

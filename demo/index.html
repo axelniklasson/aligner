@@ -109,7 +109,7 @@
   .hero-art .guide.v { left: 88px; top: 0; bottom: 0; width: 2px; height: auto; }
 
   /* ---------- Stats ---------- */
-  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 40px; }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 40px; align-items: start; } /* start: a taller card must not stretch the row */
   .stat { padding: 18px 18px 18px; display: flex; flex-direction: column; gap: 14px; }
   .stat .head { display: flex; align-items: center; justify-content: space-between; }
   .stat .label { color: var(--text-2); font-weight: 500; }
@@ -256,6 +256,8 @@
   body.reveal .toggle[data-flaw]::after { bottom: auto; left: auto; right: calc(100% + 10px); top: 50%; transform: translateY(-50%); margin-bottom: 0; }
   .reveal-note { display: none; position: fixed; left: 24px; bottom: 24px; z-index: 20; background: #1d1d1f; color: #fff; padding: 10px 14px; border-radius: 10px; font-size: 13px; max-width: 360px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
   body.reveal .reveal-note { display: block; }
+  /* #stage: used when recording the demo GIF — no floating chrome. */
+  body.stage .reveal-toggle, body.stage .reveal-note { display: none; }
 
   /* ================================================================
      THE PLANTED FLAWS. Everything below nudges one element by 4–6 px.
@@ -488,6 +490,27 @@
 <script>
   document.getElementById('count').textContent = document.querySelectorAll('[data-flaw]').length;
   if (location.hash === '#reveal') document.body.classList.add('reveal');
+  // #stage: scroll the stat cards into a known spot and publish their viewport
+  // rects (CSS px) in the window title so the GIF recorder can find them.
+  if (location.hash === '#stage') {
+    document.body.classList.add('stage');
+    const stats = document.querySelector('.stats');
+    window.scrollTo(0, stats.getBoundingClientRect().top + window.scrollY - 120);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      // Chrome elides long window titles, so keep this compact: the card
+      // grid is regular, so its origin, size and gap plus the first icon
+      // describe everything the recorder needs.
+      const rect = el => el.getBoundingClientRect();
+      const cards = [...document.querySelectorAll('.stat')].map(rect);
+      const icon = rect(document.querySelector('.stat .icon-box'));
+      const n = v => Math.round(v);
+      document.title = ['stage',
+        [innerWidth, innerHeight].map(n).join(','),
+        [cards[0].left, cards[0].top, cards[0].width, cards[0].height, cards[1].left - cards[0].right].map(n).join(','),
+        [icon.left, icon.top, icon.width].map(n).join(','),
+      ].join('|');
+    }));
+  }
   addEventListener('keydown', e => {
     if (e.key === 'r' || e.key === 'R') {
       if (e.target.tagName === 'INPUT') return;

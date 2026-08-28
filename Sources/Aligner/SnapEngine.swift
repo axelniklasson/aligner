@@ -4,6 +4,10 @@ import AppKit
 enum SnapEngine {
     /// How close (in points) a coordinate has to be to an edge to snap.
     static let radius: CGFloat = 6
+    /// How far (in points) off a snapped line another element's edge may be
+    /// and still be reported as a near-miss. A little beyond `radius` so an
+    /// offset equal to the snap radius isn't lost to anti-aliasing.
+    static let nearMissRadius: CGFloat = 8
     /// Half-width (in points) of the stretch of edge used to rank boundaries.
     static let window: CGFloat = 20
     /// Shortest edge (in points) worth snapping to — filters out text glyphs.

@@ -77,6 +77,21 @@ final class OverlayView: NSView {
     private var hovered: Target?
     private var storeObserver: NSObjectProtocol?
 
+    /// Set while a scripted demo feeds synthesized events: hover and edge
+    /// captures work as if capturing, without intercepting the real pointer.
+    var scripted = false
+
+    /// A cursor drawn by the view itself (view coords), for scripted demos
+    /// where no real pointer moves.
+    var virtualCursor: NSPoint? {
+        didSet {
+            let image = NSCursor.crosshair.image
+            for point in [oldValue, virtualCursor].compactMap({ $0 }) {
+                setNeedsDisplay(NSRect(x: point.x - image.size.width, y: point.y - image.size.height, width: image.size.width * 2, height: image.size.height * 2))
+            }
+        }
+    }
+
     private var edgeMap: EdgeMap?
     private var edgeMapTime: TimeInterval = 0
     private var captureInFlight = false
@@ -168,7 +183,7 @@ final class OverlayView: NSView {
     }
 
     override func mouseMoved(with event: NSEvent) {
-        guard isCapturing, drag == nil else { return }
+        guard isCapturing || scripted, drag == nil else { return }
         setHovered(target(near: convert(event.locationInWindow, from: nil)))
         // Keep a recent map around so the anchor can snap the moment the
         // mouse goes down.
@@ -401,7 +416,7 @@ final class OverlayView: NSView {
         // overlapping an on-line segment is the same element (the other side
         // of a border, an anti-aliasing neighbour) and is skipped.
         let occupied = onLine + [edge]
-        let radius = Int((SnapEngine.radius * map.scale).rounded(.up))
+        let radius = Int((SnapEngine.nearMissRadius * map.scale).rounded(.up))
         var misses: [(DetectedEdge, Int)] = []
         for offset in -radius...radius where offset != 0 {
             for segment in EdgeDetector.segments(in: map, orientation: edge.orientation, boundary: edge.position + offset, from: from, to: to, parameters: parameters) {
@@ -454,7 +469,7 @@ final class OverlayView: NSView {
         provider { [weak self] map in
             guard let self else { return }
             captureInFlight = false
-            guard let map, isCapturing || drag != nil else { return }
+            guard let map, isCapturing || scripted || drag != nil else { return }
             edgeMap = map
             edgeMapTime = ProcessInfo.processInfo.systemUptime
             if drag != nil { recomputePreview() }
@@ -587,6 +602,12 @@ final class OverlayView: NSView {
             for highlight in highlights {
                 drawEdgeHighlight(highlight, map: map, window: window, in: context)
             }
+        }
+
+        if let virtualCursor {
+            let cursor = NSCursor.crosshair
+            let origin = NSPoint(x: virtualCursor.x - cursor.hotSpot.x, y: virtualCursor.y - (cursor.image.size.height - cursor.hotSpot.y))
+            cursor.image.draw(at: origin, from: .zero, operation: .sourceOver, fraction: 1)
         }
     }
 

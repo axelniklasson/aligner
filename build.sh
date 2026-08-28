@@ -2,6 +2,7 @@
 # Builds Aligner.app into ./build. Usage:
 #   ./build.sh            build only
 #   ./build.sh run        build, then (re)launch
+#   ./build.sh demo       build, launch, and open the demo page
 #   ./build.sh install    build, copy to /Applications, then (re)launch
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -30,6 +31,11 @@ else
 fi
 
 case "${1:-}" in
+  demo)
+    pkill -x Aligner 2>/dev/null || true
+    open "$APP"
+    open demo/index.html
+    ;;
   run)
     pkill -x Aligner 2>/dev/null || true
     open "$APP"
