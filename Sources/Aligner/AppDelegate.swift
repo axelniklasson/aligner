@@ -484,6 +484,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// `ALIGNER_DEBUG_SNAPTEST=1`: drives the first overlay with synthesized
+    /// mouse events — a horizontal drag just below the menu bar's bottom edge
+    /// (pixel row 50 on the main display at 2×) — and logs whether the
+    /// committed line snapped flush to it, then repeats with ⌘ held.
+    private func runSnapTest() {
+        guard ProcessInfo.processInfo.environment["ALIGNER_DEBUG_SNAPTEST"] != nil,
+              let window = overlays.first else { return }
+        let view = window.overlayView
+        let scale = window.backingScaleFactor
+        let edgeY = window.frame.maxY - 25   // menu bar bottom, in points
+        let width = max(LineSettings.shared.style.width * scale, 1)
+        let expected = window.frame.maxY - (25 * scale + width / 2) / scale
+        Debug.log("snaptest: snapToEdges=\(view.snapToEdges) edge y=\(edgeY) expected flush y=\(expected)")
+
+        func event(_ type: NSEvent.EventType, _ point: NSPoint, _ flags: NSEvent.ModifierFlags) -> NSEvent {
+            NSEvent.mouseEvent(
+                with: type, location: window.convertPoint(fromScreen: point), modifierFlags: flags,
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                context: nil, eventNumber: 0, clickCount: 1, pressure: 1
+            )!
+        }
+
+        func drag(from a: NSPoint, to b: NSPoint, flags: NSEvent.ModifierFlags, label: String, then: @escaping () -> Void) {
+            let before = LineStore.shared.lines.count
+            view.mouseDown(with: event(.leftMouseDown, a, flags))
+            // Give the capture time to arrive before finishing the drag.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                view.mouseDragged(with: event(.leftMouseDragged, b, flags))
+                view.mouseUp(with: event(.leftMouseUp, b, flags))
+                if LineStore.shared.lines.count > before, let line = LineStore.shared.lines.last {
+                    Debug.log("snaptest \(label): raw y=\(a.y) -> committed start=\(line.start) end=\(line.end)")
+                } else {
+                    Debug.log("snaptest \(label): no line committed")
+                }
+                then()
+            }
+        }
+
+        drag(from: NSPoint(x: 600, y: edgeY - 4), to: NSPoint(x: 900, y: edgeY - 4), flags: [.shift], label: "snap") {
+            // A different x range so the second drag doesn't grab the first line.
+            drag(from: NSPoint(x: 1200, y: edgeY - 4), to: NSPoint(x: 1500, y: edgeY - 4), flags: [.shift, .command], label: "bypass ⌘") {}
+        }
+    }
+
     /// Asks the window server which window would receive a click at the centre
     /// of each screen, first with capture on and then off, and draws a few
     /// sample lines in different styles so a dump can verify rendering.
@@ -513,6 +557,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         Debug.log("selftest: added sample lines around (\(cx), \(cy))")
                         dumpOverlay()
                         dumpCapture()
+                        runSnapTest()
                     }
                 }
             }
