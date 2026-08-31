@@ -23,8 +23,12 @@ Requires macOS 14+ and Xcode (or the Command Line Tools); it's a plain SwiftPM
 package. `./build.sh run` launches from `./build` instead of installing. To
 start Aligner at login, add it under *System Settings → General → Login Items*.
 
-On first launch macOS asks for **Screen Recording** access — that's what the
-edge snapping reads. Grant it and relaunch; everything else works without it.
+On first launch macOS asks for two permissions, both optional:
+
+- **Screen Recording** — what edge snapping reads. Grant and relaunch.
+- **Accessibility** — lets a ⇧-press that wasn't a drag be delivered to the
+  app underneath as a normal click, so ⇧-selection in lists keeps working
+  while Aligner is on. Without it, clicks are swallowed while ⇧ is held.
 
 ## Use
 
@@ -35,6 +39,7 @@ edge snapping reads. Grant it and relaunch; everything else works without it.
 | Extend, shorten or re-angle a guide | Hold ⇧, drag one of its endpoint handles; the other end stays put. Keep ⇧ held to snap the angle to 45°, release it mid-drag to move freely |
 | Stretch a guide across the screen | Hold ⇧, double-click it |
 | Skip edge snapping for one drag | Hold ⌘ mid-drag |
+| Click things while ⇧ is held | Just click — a press without a drag is forwarded to the app underneath, ⇧-scroll and right-clicks too (needs Accessibility access) |
 | Undo the last guide | Double-tap ⇧ · menu · ⌃⌥⌘Z |
 | Clear all guides | Triple-tap ⇧ · menu · ⌃⌥⌘C |
 | Change colour, thickness, dash style | Menu-bar ╱ → *Color* / *Thickness* / *Style* (applies to the next guide) |

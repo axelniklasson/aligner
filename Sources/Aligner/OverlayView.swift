@@ -17,6 +17,10 @@ final class OverlayView: NSView {
     /// Captures this view's display as an `EdgeMap`; nil when unavailable.
     var edgeMapProvider: ((@escaping (EdgeMap?) -> Void) -> Void)?
 
+    /// Whether clicks without a drag are re-posted to the app underneath
+    /// (setting and Accessibility permission).
+    var clickThrough = false
+
     /// Whether snapping to on-screen edges is on (setting and permission).
     var snapToEdges = false {
         didSet { if !snapToEdges { edgeMap = nil } }
@@ -58,6 +62,11 @@ final class OverlayView: NSView {
 
         var kind: Kind
         var current: NSPoint
+        /// Where the mouse went down (view coords) and how, for forwarding
+        /// the press to the app underneath if it turns out to be a click.
+        var rawDown: NSPoint
+        var downClickCount: Int
+        var downFlags: CGEventFlags
         /// Mirrors ⇧: a dragged end snaps to 45° while it is held.
         var snap45: Bool
         /// Mirrors ⌘ (inverted): hold ⌘ to skip edge snapping.
@@ -220,6 +229,7 @@ final class OverlayView: NSView {
     // MARK: - Mouse
 
     override func mouseDown(with event: NSEvent) {
+        guard !ClickForwarder.isForwarded(event) else { return }
         let point = convert(event.locationInWindow, from: nil)
         let target = target(near: point)
 
@@ -251,6 +261,9 @@ final class OverlayView: NSView {
         drag = DragState(
             kind: kind,
             current: point,
+            rawDown: point,
+            downClickCount: event.clickCount,
+            downFlags: event.cgEvent?.flags ?? .maskShift,
             snap45: event.modifierFlags.contains(.shift),
             edgeSnap: !event.modifierFlags.contains(.command)
         )
@@ -281,6 +294,26 @@ final class OverlayView: NSView {
         invalidate(state.preview)
         invalidateHighlights(state.highlights)
 
+        // No real drag: this was a click. On empty space or a line's body it
+        // belongs to the app underneath (a handle stays ours).
+        let rawMovement = hypot(point.x - state.rawDown.x, point.y - state.rawDown.y)
+        if rawMovement < 3, clickThrough, let overlayWindow = window as? OverlayWindow {
+            switch state.kind {
+            case .draw, .move:
+                ClickForwarder.forwardClick(
+                    at: overlayWindow.convertPoint(toScreen: convert(state.rawDown, to: nil)),
+                    flags: state.downFlags,
+                    clickCount: state.downClickCount,
+                    through: overlayWindow
+                )
+                setHovered(target(near: point))
+                updateCursor()
+                return
+            case .resize:
+                break
+            }
+        }
+
         if let result = state.preview, Self.length(of: result) >= 2 {
             switch state.kind {
             case .draw:
@@ -295,6 +328,24 @@ final class OverlayView: NSView {
         }
         setHovered(target(near: point))
         updateCursor()
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        guard !ClickForwarder.isForwarded(event) else { return }
+        guard clickThrough, let overlayWindow = window as? OverlayWindow else { return }
+        ClickForwarder.forwardClick(
+            at: overlayWindow.convertPoint(toScreen: event.locationInWindow),
+            right: true,
+            flags: event.cgEvent?.flags ?? .maskShift,
+            clickCount: event.clickCount,
+            through: overlayWindow
+        )
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        guard !ClickForwarder.isForwarded(event) else { return }
+        guard clickThrough, let overlayWindow = window as? OverlayWindow else { return }
+        ClickForwarder.forwardScroll(event, through: overlayWindow)
     }
 
     // MARK: - Preview & snapping

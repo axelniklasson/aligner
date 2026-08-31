@@ -88,7 +88,14 @@ extension AppDelegate {
                 Debug.log("snaptest: snapToEdges=\(view.snapToEdges) raw y=\(raw.y) expected " +
                           (expected.map { "y=\($0.value) (boundary \($0.edge.position))" } ?? "no edge in range"))
                 drag(from: raw, to: NSPoint(x: raw.x + 300, y: raw.y), flags: [.shift]) { line in
-                    let ok = line != nil && expected != nil && line!.start.y == expected!.value && line!.end.y == expected!.value
+                    // With an edge in range the line must sit flush on it; with
+                    // none, committing the raw position is the correct result.
+                    let ok: Bool
+                    if let expected {
+                        ok = line != nil && line!.start.y == expected.value && line!.end.y == expected.value
+                    } else {
+                        ok = line != nil && line!.start.y == raw.y && line!.end.y == raw.y
+                    }
                     Debug.log("snaptest snap: \(ok ? "PASS" : "FAIL") committed=\(line.map { "\($0.start)-\($0.end)" } ?? "none")")
                     // A different x range so the second drag doesn't grab the first line.
                     let raw2 = NSPoint(x: 1200, y: raw.y)

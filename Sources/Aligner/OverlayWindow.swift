@@ -8,6 +8,7 @@ final class OverlayWindow: NSPanel {
     let displayID: CGDirectDisplayID
 
     private var wantsCapture = false
+    private var forwardingHolds = 0
     private(set) var isCapturing = false
 
     init(screen: NSScreen) {
@@ -55,13 +56,28 @@ final class OverlayWindow: NSPanel {
         applyCapture()
     }
 
+    /// While events we forwarded travel to the app underneath, the window must
+    /// not capture them. The capture state itself is untouched, so the cursor
+    /// and hover UI don't flicker.
+    func beginForwardingHold() {
+        forwardingHolds += 1
+        ignoresMouseEvents = true
+    }
+
+    func endForwardingHold() {
+        forwardingHolds = max(0, forwardingHolds - 1)
+        if forwardingHolds == 0 {
+            ignoresMouseEvents = !isCapturing
+        }
+    }
+
     private func applyCapture() {
         // Never drop capture in the middle of a drag; the remaining drag and
         // mouse-up events need to keep arriving at this window.
         let effective = wantsCapture || overlayView.isDragging
         guard effective != isCapturing else { return }
         isCapturing = effective
-        ignoresMouseEvents = !effective
+        ignoresMouseEvents = !effective || forwardingHolds > 0
         overlayView.isCapturing = effective
         Debug.log("window \(windowNumber) capturing=\(effective)")
     }

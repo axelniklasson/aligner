@@ -6,6 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var helpItems: [NSMenuItem] = []
     private var enabledItem: NSMenuItem!
     private var snapItem: NSMenuItem!
+    private var clickThroughItem: NSMenuItem!
     private var modifierItems: [DrawModifier: NSMenuItem] = [:]
     private var colorItems: [NSMenuItem] = []
     private var customColorItem: NSMenuItem!
@@ -22,11 +23,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         static let enabled = "enabled"
         static let modifier = "modifier"
         static let snap = "snapToElements"
+        static let clickThrough = "clickThrough"
     }
 
     private var isSnapEnabled: Bool {
         get { UserDefaults.standard.object(forKey: Keys.snap) as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: Keys.snap) }
+    }
+
+    private var isClickThroughEnabled: Bool {
+        get { UserDefaults.standard.object(forKey: Keys.clickThrough) as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: Keys.clickThrough) }
     }
 
     private var isEnabled: Bool {
@@ -89,6 +96,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // prompt if the user hasn't decided yet.
             ScreenSampler.requestAuthorization()
         }
+        if isClickThroughEnabled, !ClickForwarder.isAuthorized {
+            // Same for Accessibility, which click pass-through needs.
+            ClickForwarder.requestAuthorization(prompting: true)
+        }
 
         if Debug.enabled {
             if ProcessInfo.processInfo.environment["ALIGNER_DEBUG_GIF"] != nil {
@@ -127,12 +138,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Debug.log("overlays: \(overlays.map { "\($0.windowNumber)@\($0.frame)" })")
         updateCapture()
         applySnapSetting()
+        applyClickThrough()
     }
 
     private func applySnapSetting() {
         let snap = isSnapEnabled && screenCaptureAuthorized
         for window in overlays {
             window.overlayView.snapToEdges = snap
+        }
+    }
+
+    private func applyClickThrough() {
+        let enabled = isClickThroughEnabled && ClickForwarder.isAuthorized
+        for window in overlays {
+            window.overlayView.clickThrough = enabled
         }
     }
 
@@ -170,6 +189,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         snapItem = NSMenuItem(title: "Snap to Elements", action: #selector(toggleSnap), keyEquivalent: "")
         snapItem.target = self
         menu.addItem(snapItem)
+
+        clickThroughItem = NSMenuItem(title: "Pass Clicks Through", action: #selector(toggleClickThrough), keyEquivalent: "")
+        clickThroughItem.target = self
+        menu.addItem(clickThroughItem)
         menu.addItem(.separator())
 
         let undo = NSMenuItem(title: "Undo Last Line", action: #selector(undoLine), keyEquivalent: "z")
@@ -193,6 +216,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let quit = NSMenuItem(title: "Quit Aligner", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
 
+        menu.delegate = self
         statusItem.menu = menu
         refreshMenuState()
     }
@@ -259,6 +283,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             reshape,
             "Stretch a line across the screen:  hold \(m) and double-click it",
             "Snap to elements:  lines snap to edges on screen as you draw, move or reshape; hold ⌘ mid-drag to skip",
+            "Click things underneath:  a \(m)-press without a drag is a click and goes to the app, so list selection keeps working",
             nil,
             "Undo the last line:  double-tap \(m), or ⌃⌥⌘Z",
             "Clear all lines:  triple-tap \(m), or ⌃⌥⌘C",
@@ -307,6 +332,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         snapItem.title = isSnapEnabled && !screenCaptureAuthorized
             ? "Snap to Elements — Needs Screen Recording Access…"
             : "Snap to Elements"
+        let accessibility = ClickForwarder.isAuthorized
+        clickThroughItem.state = isClickThroughEnabled && accessibility ? .on : .off
+        clickThroughItem.title = isClickThroughEnabled && !accessibility
+            ? "Pass Clicks Through — Needs Accessibility Access…"
+            : "Pass Clicks Through"
         for (candidate, item) in modifierItems {
             item.state = candidate == current ? .on : .off
         }
@@ -392,6 +422,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.terminate(nil)
     }
 
+    @objc private func toggleClickThrough() {
+        if isClickThroughEnabled, !ClickForwarder.isAuthorized {
+            // Already on but blocked: help the user grant access rather than
+            // toggling it off.
+            explainAccessibility()
+        } else {
+            isClickThroughEnabled.toggle()
+            if isClickThroughEnabled, !ClickForwarder.isAuthorized {
+                ClickForwarder.requestAuthorization(prompting: true)
+                explainAccessibility()
+            }
+        }
+        refreshMenuState()
+        applyClickThrough()
+    }
+
+    private func explainAccessibility() {
+        let alert = NSAlert()
+        alert.messageText = "Aligner needs Accessibility access to pass clicks through"
+        alert.informativeText = "While the draw key is held, Aligner has to decide whether a mouse press is a guide or a click for the app underneath. A press without a drag is a click, and delivering it to that app requires Accessibility access.\n\nTurn on Aligner under System Settings → Privacy & Security → Accessibility, then relaunch Aligner if clicks still don't pass through."
+        alert.addButton(withTitle: "Open System Settings")
+        alert.addButton(withTitle: "Relaunch Aligner")
+        alert.addButton(withTitle: "Later")
+        NSApp.activate(ignoringOtherApps: true)
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+                NSWorkspace.shared.open(url)
+            }
+        case .alertSecondButtonReturn:
+            relaunch()
+        default:
+            break
+        }
+    }
+
     @objc private func undoLine() {
         LineStore.shared.undo()
     }
@@ -446,5 +512,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let mods = controlKey | optionKey | cmdKey
         hotKeys.register(keyCode: kVK_ANSI_Z, modifiers: mods) { LineStore.shared.undo() }
         hotKeys.register(keyCode: kVK_ANSI_C, modifiers: mods) { LineStore.shared.clear() }
+    }
+}
+
+extension AppDelegate: NSMenuDelegate {
+    /// Permissions can be granted while we run; re-check when the menu opens.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        screenCaptureAuthorized = ScreenSampler.isAuthorized
+        refreshMenuState()
+        applySnapSetting()
+        applyClickThrough()
     }
 }
